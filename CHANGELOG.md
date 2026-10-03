@@ -1,5 +1,15 @@
 # RoyaltyOS Changelog
 
+## Unreleased
+
+### Fixed
+
+- AI extraction saved zero rules while reporting success: some gateways accept the `input_file` part, bill its tokens, then silently drop it. PDFs are now parsed server-side (pdf.js per-page text) and sent as `input_text`, which every gateway forwards. `OPENAI_SEND_PDF_FILE=true` additionally attaches the native file for providers proven to forward it (api.openai.com).
+- Image-only PDFs fail fast with a scan/OCR message instead of burning tokens; textless priors are skipped with a warning.
+- Model beneficiary keys are normalized to `snake_case` with a party-name fallback, so activation compiles against registered recipient keys.
+- PayPal Sandbox answers invoice creation with a bare self-link, not the invoice object: the gateway now reads the id off the href.
+- Every mutating button shows an inline spinner and ignores double-clicks; route changes paint a loading skeleton first.
+
 ## 1.0.2 - 2026-10-03
 
 ### Fixed

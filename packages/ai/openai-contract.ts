@@ -149,10 +149,35 @@ export async function extractContractWithOpenAI(
     return { pages, truncated };
   };
   const current = await readDocument(input.filename, input.bytes, input.documentVersion);
+  const currentChars = current.pages.reduce((sum, page) => sum + page.text.replace(/\s/g, "").length, 0);
+  if (!currentChars) {
+    throw new Error(
+      `No extractable text found in ${input.filename}: the PDF has no text layer (likely a scan or photo). ` +
+      `Text extraction is the only path this provider supports; image-only documents need OCR first.`,
+    );
+  }
   const priorDocuments = (input.priorDocuments ?? []).slice(-3);
   const content: Array<Record<string, unknown>> = [];
+  // Optional native file attachment for providers that actually forward it
+  // (api.openai.com does; most compatible gateways bill the tokens and drop
+  // the part). Text below is always the primary source, never the file.
+  if (config.ai.sendPdfFile) {
+    const attach = (filename: string, bytes: Uint8Array, documentVersion: number) => content.push({
+      type: "input_file",
+      filename: `v${documentVersion}-${filename}`,
+      file_data: `data:application/pdf;base64,${Buffer.from(bytes).toString("base64")}`,
+      detail: config.ai.pdfDetail,
+    });
+    for (const prior of priorDocuments) attach(prior.filename, prior.bytes, prior.documentVersion);
+    attach(input.filename, input.bytes, input.documentVersion);
+  }
   for (const prior of priorDocuments) {
     const priorText = await readDocument(prior.filename, prior.bytes, prior.documentVersion);
+    const priorChars = priorText.pages.reduce((sum, page) => sum + page.text.replace(/\s/g, "").length, 0);
+    if (!priorChars) {
+      serverWarnings.push(`Prior document ${prior.filename} has no extractable text and was skipped.`);
+      continue;
+    }
     content.push({
       type: "input_text",
       text: `The following contract text is PRIOR contract version ${prior.documentVersion}. Use it only as agreement history to detect superseded, contradictory, or amended terms.\n\n${documentTextBlock("Prior", prior.filename, prior.documentVersion, priorText.pages)}`,
