@@ -76,6 +76,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       malwareScanMode: env.MALWARE_SCAN_MODE ?? "disabled",
       clamavHost: env.CLAMAV_HOST ?? "127.0.0.1",
       clamavPort: optionalInt("CLAMAV_PORT", 3310, env),
+      corsOrigins: (env.CORS_ORIGINS ?? "")
+        .split(",")
+        .map((origin) => origin.trim().replace(/\/$/, ""))
+        .filter(Boolean),
     },
     notifications: {
       provider: (env.NOTIFICATION_PROVIDER ?? "disabled") as "disabled" | "resend",

@@ -1,6 +1,25 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { AppConfig } from "../../packages/core/config.ts";
 import type { AppContext } from "./context.ts";
 import { statusError } from "./http.ts";
+
+/** True when a browser Origin may mutate: the canonical app origin or an allowlisted extra. */
+export function isAllowedOrigin(config: AppConfig, originValue: string): boolean {
+  const allowed = new Set<string>();
+  try {
+    allowed.add(new URL(config.appBaseUrl).origin);
+  } catch {
+    // Invalid APP_BASE_URL fails closed: only explicit allowlist entries pass.
+  }
+  for (const entry of config.security.corsOrigins) {
+    try {
+      allowed.add(new URL(entry).origin);
+    } catch {
+      // Ignore malformed allowlist entries rather than crashing the router.
+    }
+  }
+  return allowed.has(originValue);
+}
 import { handleAssistantRoutes } from "./routes/assistant.ts";
 import { handleAuthRoutes } from "./routes/auth.ts";
 import { handleContractRoutes } from "./routes/contracts.ts";
@@ -28,10 +47,12 @@ export async function handleApi(
 
   // Same-origin browser mutations are required when authentication is carried by
   // HttpOnly cookies. Non-browser API clients may omit Origin and use Bearer auth.
+  // CORS_ORIGINS (comma-separated) allows extra frontends, e.g. a custom domain
+  // alongside the Render default URL.
   if (!["GET", "HEAD", "OPTIONS"].includes(method) && path !== "/api/v1/webhooks/paypal") {
     const origin = req.headers.origin;
     const originValue = Array.isArray(origin) ? origin[0] : origin;
-    if (originValue && originValue !== new URL(ctx.config.appBaseUrl).origin) {
+    if (originValue && !isAllowedOrigin(ctx.config, originValue)) {
       throw statusError(403, "Cross-origin mutation blocked");
     }
   }
