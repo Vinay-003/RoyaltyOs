@@ -1,0 +1,12 @@
+.env
+.env.local
+node_modules/
+dist/
+.freebuff/
+.kilo/
+coverage/
+.DS_Store
+*.log
+.tmp/
+supabase/.temp/
+supabase/.branches/
