@@ -1,0 +1,43 @@
+# RoyaltyOS local Supabase configuration.
+# Safe to commit: secrets are not stored here.
+project_id = "royaltyos"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+# If your hosted project uses another major version, align this value before local diff/reset.
+major_version = 15
+
+[db.migrations]
+enabled = true
+
+[db.seed]
+enabled = false
+
+[studio]
+enabled = true
+port = 54323
+
+[inbucket]
+enabled = true
+port = 54324
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://127.0.0.1:3000"]
+jwt_expiry = 3600
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+# Keep local acceptance tests simple. Hosted environments can keep their own confirmation policy.
+enable_confirmations = false
