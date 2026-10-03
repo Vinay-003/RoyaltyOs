@@ -1,6 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { PayPalGateway } from "../../packages/paypal/gateway.ts";
+import { invoiceIdFromLinks, PayPalGateway } from "../../packages/paypal/gateway.ts";
+
+test("invoice id is read off the bare self-link creation response",async()=>{
+ const fetchImpl=async(url:any,init:any={})=>{
+   if(String(url).endsWith("/v1/oauth2/token")) return new Response(JSON.stringify({access_token:"ACCESS",expires_in:3600}),{status:200,headers:{"Content-Type":"application/json"}});
+   return new Response(JSON.stringify({rel:"self",href:"https://api.sandbox.paypal.com/v2/invoicing/invoices/INV2-LINK-ONLY",method:"GET"}),{status:201,headers:{"Content-Type":"application/json"}});
+ };
+ const gateway=new PayPalGateway(testConfig(),fetchImpl as any);
+ const invoice=await gateway.createInvoice({requestId:"idem-link",currency:"USD",recipientEmail:"buyer@example.com",itemName:"Revenue",amountMinor:1000});
+ assert.equal(invoice.id,"INV2-LINK-ONLY");
+ assert.equal(invoiceIdFromLinks([{rel:"self",href:"https://api-m.sandbox.paypal.com/v2/invoicing/invoices/INV2-X9/",method:"GET"}]),"INV2-X9");
+ assert.equal(invoiceIdFromLinks([{rel:"self",href:"https://example.test/other"}]),null);
+ assert.equal(invoiceIdFromLinks("nope"),null);
+});
 import { testConfig } from "../helpers.ts";
 
 test("PayPal gateway authenticates, creates invoice with idempotency and verifies webhook",async()=>{

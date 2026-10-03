@@ -1,6 +1,17 @@
 import type { AppConfig } from "../core/config.ts";
 import { fetchWithRetry } from "../core/http-retry.ts";
 
+/** Reads an invoice id off PayPal link objects (self href shapes vary by endpoint). */
+export function invoiceIdFromLinks(links: unknown): string | null {
+  if (!Array.isArray(links)) return null;
+  for (const link of links) {
+    const href = typeof (link as { href?: unknown })?.href === "string" ? String((link as { href: string }).href) : null;
+    const id = href?.match(/\/v2\/invoicing\/invoices\/([A-Za-z0-9-]+)\/?$/)?.[1];
+    if (id) return id;
+  }
+  return null;
+}
+
 export type PayoutItemRequest = {
   recipientEmail: string;
   amountMinor: number;
@@ -75,7 +86,7 @@ export class PayPalGateway {
     note?: string;
     reference?: string;
   }) {
-    return await this.json("/v2/invoicing/invoices", {
+    const body = await this.json("/v2/invoicing/invoices", {
       method: "POST",
       requestId: input.requestId,
       body: {
@@ -91,7 +102,15 @@ export class PayPalGateway {
           unit_amount: { currency_code: input.currency, value: moneyString(input.amountMinor) },
         }],
       },
-    });
+    }) as Record<string, any>;
+    // PayPal answers creation with a bare self link (rel self, href ending in
+    // /v2/invoicing/invoices/INV2-xxx) rather than the full invoice object,
+    // so the id must be read off the href.
+    const id = typeof body?.id === "string" && body.id
+      ? body.id
+      : invoiceIdFromLinks(body?.links ?? (typeof body?.href === "string" ? [body] : []));
+    if (!id) throw new Error(`PayPal did not return an invoice id: ${JSON.stringify(body)?.slice(0, 300)}`);
+    return { ...body, id } as Record<string, any>;
   }
 
   async sendInvoice(invoiceId: string, requestId: string) {
