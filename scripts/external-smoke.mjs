@@ -43,8 +43,8 @@ await run('Supabase REST + migrations', async () => {
   const text = await response.text();
   if (!response.ok) throw new Error(`${response.status} ${text}`);
   const rows = JSON.parse(text);
-  if (!Array.isArray(rows) || !rows.some((row) => row.version === (env.APP_VERSION ?? '1.0.1'))) {
-    throw new Error(`APP_VERSION ${env.APP_VERSION ?? '1.0.1'} not found in app_versions; run Supabase migrations first`);
+  if (!Array.isArray(rows) || !rows.some((row) => row.version === (env.APP_VERSION ?? '1.0.2'))) {
+    throw new Error(`APP_VERSION ${env.APP_VERSION ?? '1.0.2'} not found in app_versions; run Supabase migrations first`);
   }
   return `${rows.length} app version record(s)`;
 });

@@ -70,7 +70,7 @@ test("version endpoint is reachable without external providers", async () => {
     assert.ok(address && typeof address === "object");
     const response = await fetch(`http://127.0.0.1:${address.port}/api/version`);
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { version: "1.0.1-test" });
+    assert.deepEqual(await response.json(), { version: "1.0.2-test" });
   } finally {
     await new Promise<void>((resolve) => server.close(resolve));
   }
@@ -87,7 +87,7 @@ test("health, readiness and provider status are separated", async () => {
 
     const health = await (await fetch(`${base}/api/health`)).json();
     assert.equal(health.status, "ok");
-    assert.equal(health.version, "1.0.1-test");
+    assert.equal(health.version, "1.0.2-test");
     assert.equal(health.paypal, undefined, "liveness never calls a provider");
 
     const readiness = await (await fetch(`${base}/api/readiness`)).json();

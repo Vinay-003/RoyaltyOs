@@ -1,9 +1,9 @@
-# RoyaltyOS v1.0.1 - Final Build Report
+# RoyaltyOS v1.0.2 - Final Build Report
 
 Date: 03 October 2026
 Architecture baseline: `RoyaltyOS_Project_Record_System_Architecture_v0.1.docx`
 
-> Superseded by `reports/release-1.0.1.md` for the v1.0.1 behavioral verification. This file is kept as the release narrative.
+> Superseded by `reports/release-1.0.2.md` for the v1.0.2 behavioral verification. This file is kept as the release narrative.
 
 ## Executive result
 
@@ -148,10 +148,10 @@ See `docs/PROVIDER_CHOICES.md` for the exact PayPal AI/SDK answer.
 
 ## Release/version management
 
-- `VERSION`: `1.0.1`
-- `package.json`: `1.0.1`
-- `APP_VERSION` defaults/docs: `1.0.1`
-- Supabase release migration records `1.0.1` in `app_versions` (with the `1.0.0` baseline record retained)
+- `VERSION`: `1.0.2`
+- `package.json`: `1.0.2`
+- `APP_VERSION` defaults/docs: `1.0.2`
+- Supabase release migration records `1.0.2` in `app_versions` (with the `1.0.0`/`1.0.1` records retained)
 - `CHANGELOG.md` retains previous milestones
 - `docs/VERSIONING.md` defines the release procedure
 

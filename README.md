@@ -1,4 +1,4 @@
-# RoyaltyOS v1.0.1
+# RoyaltyOS v1.0.2
 
 RoyaltyOS is contract-to-revenue infrastructure for collaborative work. It turns PDF agreements into human-reviewed, versioned financial rules, reconciles PayPal Sandbox revenue, calculates deterministic settlements, requires finance approval, sends idempotent PayPal payouts, and preserves explainable royalty statements, ledger records, reconciliation issues, and audit history.
 
@@ -176,4 +176,4 @@ The amendment changes Producer's post-recoupment share from 20% to 15%, which sh
 
 ## Version
 
-Current release: **1.0.1**. See `VERSION` and `CHANGELOG.md`.
+Current release: **1.0.2**. See `VERSION` and `CHANGELOG.md`.

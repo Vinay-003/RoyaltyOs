@@ -5,7 +5,7 @@ export function testConfig(overrides: Record<string, string> = {}) {
     NODE_ENV: "test",
     PORT: "3000",
     APP_BASE_URL: "http://localhost:3000",
-    APP_VERSION: "1.0.1-test",
+    APP_VERSION: "1.0.2-test",
     SUPABASE_URL: "https://example.supabase.co",
     SUPABASE_ANON_KEY: "anon-test-key",
     SUPABASE_SERVICE_ROLE_KEY: "service-test-key",

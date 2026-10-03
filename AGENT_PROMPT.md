@@ -4,7 +4,7 @@ Copy everything below into a capable coding agent running in the repository root
 
 ---
 
-You are the release engineer for RoyaltyOS v1.0.1. Your job is to get this repository running locally against Supabase and PayPal Sandbox, test it comprehensively, and prepare it for Render. Do not redesign the product or weaken financial/security boundaries. Do not use production PayPal credentials or real money.
+You are the release engineer for RoyaltyOS v1.0.2. Your job is to get this repository running locally against Supabase and PayPal Sandbox, test it comprehensively, and prepare it for Render. Do not redesign the product or weaken financial/security boundaries. Do not use production PayPal credentials or real money.
 
 ## Canonical architecture rules
 
@@ -76,7 +76,7 @@ Do not modify the remote database manually in the Dashboard after using migratio
 Verify:
 
 - migrations 001 through 005 applied
-- `app_versions` includes `1.0.1` (with the `1.0.0` baseline record retained)
+- `app_versions` includes `1.0.2` (with the `1.0.0`/`1.0.1` records retained)
 - `royaltyos-contracts` Storage bucket exists and `public=false`
 - RLS is enabled on tenant/domain tables
 - financial RPCs exist

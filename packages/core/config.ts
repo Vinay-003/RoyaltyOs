@@ -28,7 +28,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     nodeEnv,
     port: optionalInt("PORT", 3000, env),
     appBaseUrl: env.APP_BASE_URL ?? "http://localhost:3000",
-    appVersion: env.APP_VERSION ?? "1.0.1",
+    appVersion: env.APP_VERSION ?? "1.0.2",
     logLevel: env.LOG_LEVEL ?? "info",
     supabase: {
       url: required("SUPABASE_URL", env).replace(/\/$/, ""),

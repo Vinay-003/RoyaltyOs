@@ -1,5 +1,20 @@
 # RoyaltyOS Changelog
 
+## 1.0.2 - 2026-10-03
+
+### Fixed
+
+- Supabase-hosted `function digest(text, unknown) does not exist`: fresh Supabase projects pre-install `pgcrypto` into the `extensions` schema, so migration 001's `create extension if not exists` was a silent no-op and every `search_path=public` function (bootstrap, audit chain) failed on hosted while passing on vanilla PostgreSQL. Migration `202610030007_royaltyos_v102_supabase_compat.sql` relocates `pgcrypto` into `public` when missing, sets `search_path = public, extensions` on every `royaltyos_*` function, and defaults sessions to both schemas (covers `gen_random_uuid()` column defaults over PostgREST).
+- Sign-in showed the Display name field: `.field{display:grid}` overrode the `hidden` attribute. A global `[hidden]` rule fixes it; sign-in is email plus password only.
+- Register stranded users on a message; it now bootstraps and enters the app directly when Supabase returns a session. Backend `displayName` falls back to the email local-part.
+- Mutation guard only accepted `APP_BASE_URL`: `CORS_ORIGINS` (comma-separated) is now an additional allowlist so a custom domain and the Render default URL both work.
+
+### Added
+
+- `OPENAI_BASE_URL` override for OpenAI-compatible gateways (config, contract extraction, PayPal MCP assistant, external scripts).
+- `npm run start:free` (`scripts/start-free.mjs`): API plus outbox worker in one Render free-tier process group.
+- Free-tier Render blueprint (`render.yaml`); paid api/worker/ClamAV layout preserved in `render.paid.yaml`.
+
 ## 1.0.1 - 2026-10-03
 
 ### Fixed

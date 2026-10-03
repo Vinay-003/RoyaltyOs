@@ -1,6 +1,6 @@
 # Provider and SDK Choices
 
-Release: RoyaltyOS v1.0.1
+Release: RoyaltyOS v1.0.2
 
 ## PayPal payment rail
 
@@ -35,7 +35,7 @@ The runtime calls the remote MCP server from the OpenAI Responses API and restri
 list_invoices,get_invoice,list_transactions
 ```
 
-A local PayPal MCP package (`@paypal/mcp`) and PayPal Agent Toolkit (`@paypal/agent-toolkit`) exist, but **RoyaltyOS v1.0.1 does not depend on those npm packages at runtime**. It uses PayPal's hosted MCP endpoint instead. This makes the exact answer to "which PayPal AI/SDK is used?":
+A local PayPal MCP package (`@paypal/mcp`) and PayPal Agent Toolkit (`@paypal/agent-toolkit`) exist, but **RoyaltyOS v1.0.2 does not depend on those npm packages at runtime**. It uses PayPal's hosted MCP endpoint instead. This makes the exact answer to "which PayPal AI/SDK is used?":
 
 - **PayPal AI tool:** official PayPal Remote MCP server.
 - **Payment SDK:** no PayPal SDK dependency; a typed server-side REST gateway is used.

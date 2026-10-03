@@ -25,7 +25,7 @@ npm run smoke:external
 
 Expected checks:
 
-- `app_versions` includes `1.0.1` (with the `1.0.0` baseline record retained)
+- `app_versions` includes `1.0.2` (with the `1.0.0`/`1.0.1` records retained)
 - contract bucket exists and is private
 - PayPal OAuth works
 - PayPal Invoicing API is readable

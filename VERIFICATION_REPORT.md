@@ -1,8 +1,8 @@
-# RoyaltyOS v1.0.1 Verification Report
+# RoyaltyOS v1.0.2 Verification Report
 
 Date: 03 October 2026
 
-> Superseded by `reports/release-1.0.1.md` for the v1.0.1 behavioral verification. This file is kept as the release narrative.
+> Superseded by `reports/release-1.0.2.md` for the v1.0.2 behavioral verification. This file is kept as the release narrative.
 
 ## Release status
 
@@ -164,4 +164,4 @@ Included:
 
 ## Known production-stage qualifications
 
-RoyaltyOS v1.0.1 is a comprehensive PayPal Sandbox/hackathon implementation. Before handling real money, complete PayPal production onboarding and an organization-specific security review, use production-grade MFA/dual controls for high-value operations, configure monitoring/alerts/backups, enable secret/SAST/SCA/container scanning in CI and perform external security testing.
+RoyaltyOS v1.0.2 is a comprehensive PayPal Sandbox/hackathon implementation. Before handling real money, complete PayPal production onboarding and an organization-specific security review, use production-grade MFA/dual controls for high-value operations, configure monitoring/alerts/backups, enable secret/SAST/SCA/container scanning in CI and perform external security testing.

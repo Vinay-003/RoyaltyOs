@@ -13,7 +13,12 @@ The single release number is kept in:
 - `app_versions` migration record
 - Render Blueprint
 
-Current release: `1.0.1`.
+Current release: `1.0.2`.
+
+Hosted-Supabase rule: Supabase pre-installs `pgcrypto` into the `extensions`
+schema, so `create extension if not exists` is a silent no-op there. Define
+every `SECURITY DEFINER` function with `set search_path = public, extensions`
+(never bare `public`), and never assume an extension object lives in `public`.
 
 ## Domain versioning
 

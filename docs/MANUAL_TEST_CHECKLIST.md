@@ -12,8 +12,8 @@ Use Sandbox/dev accounts only. Record IDs and screenshots in a release evidence 
 
 ## B. Supabase
 
-- [ ] All migrations 001-006 applied cleanly to a fresh project/database.
-- [ ] `app_versions` includes `1.0.1` (with the `1.0.0` baseline record retained).
+- [ ] All migrations 001-007 applied cleanly to a fresh project/database.
+- [ ] `app_versions` includes `1.0.2` (with the `1.0.0`/`1.0.1` records retained).
 - [ ] Contract Storage bucket is private.
 - [ ] RLS enabled as defined by migrations.
 - [ ] Owner registration/bootstrap works.

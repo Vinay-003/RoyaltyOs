@@ -20,7 +20,7 @@ services:
       - key: NODE_ENV
         value: staging
       - key: APP_VERSION
-        value: 1.0.1
+        value: 1.0.2
       - key: APP_BASE_URL
         sync: false
       - key: SUPABASE_URL
