@@ -35,8 +35,10 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+      - key: OPENAI_BASE_URL
+        sync: false
       - key: OPENAI_MODEL
-        value: gpt-6-astra
+        sync: false
       - key: AI_PROVIDER
         value: openai
       - key: PAYPAL_AI_ENABLED
@@ -90,8 +92,10 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+      - key: OPENAI_BASE_URL
+        sync: false
       - key: OPENAI_MODEL
-        value: gpt-6-astra
+        sync: false
       - key: AI_PROVIDER
         value: openai
       - key: PAYPAL_AI_ENABLED
