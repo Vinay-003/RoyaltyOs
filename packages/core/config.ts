@@ -53,6 +53,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       openaiApiKey: required("OPENAI_API_KEY", env),
       baseUrl: (env.OPENAI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/$/, ""),
       sendPdfFile: (env.OPENAI_SEND_PDF_FILE ?? "false") === "true",
+      extractionMode: env.AI_EXTRACTION_MODE === "vision" ? "vision" : "text",
+      visionMaxPages: optionalInt("AI_VISION_MAX_PAGES", 10, env),
       model: env.OPENAI_MODEL ?? "gpt-6-astra",
       pdfDetail: (env.OPENAI_PDF_DETAIL ?? "low") as "low" | "auto" | "high",
       maxPdfBytes: optionalInt("AI_MAX_PDF_BYTES", 10 * 1024 * 1024, env),

@@ -4,6 +4,7 @@ import { compileRuleset } from "../../packages/core/ruleset-compiler.ts";
 import { calculateSettlement } from "../../packages/core/settlement-engine.ts";
 import type { CandidateRule, ExecutableRule, RecoupmentState } from "../../packages/core/types.ts";
 import { extractionToCandidates, extractContractWithOpenAI } from "../../packages/ai/openai-contract.ts";
+import { extractContractWithVision } from "../../packages/ai/vision-contract.ts";
 import { validateContractUpload } from "../../packages/security/upload.ts";
 import type { AppContext } from "./context.ts";
 import { statusError } from "./http.ts";
@@ -215,7 +216,8 @@ export async function analyzeContractVersion(
     });
   }
 
-  const result = await extractContractWithOpenAI(ctx.config, {
+  const extractor = ctx.config.ai.extractionMode === "vision" ? extractContractWithVision : extractContractWithOpenAI;
+  const result = await extractor(ctx.config, {
     filename: String(document.original_filename),
     bytes,
     documentVersion: Number(version.version),
@@ -268,6 +270,7 @@ export async function analyzeContractVersion(
     contractId: input.contractId,
     versionId: input.versionId,
     model: result.model,
+    mode: ctx.config.ai.extractionMode,
     candidates: candidates.length,
     warnings: result.extraction.warnings.length,
     conflicts: result.extraction.conflicts.length,

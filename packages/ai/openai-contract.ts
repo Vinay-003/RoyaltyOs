@@ -11,7 +11,7 @@ const RULE_TYPES = [
   "PERCENTAGE","FIXED_AMOUNT","RECOUPMENT","CAP","FLOOR","EXCLUSION","RESERVE","PRIORITY","THRESHOLD","DATE_RANGE","REVENUE_CATEGORY","UNSUPPORTED"
 ];
 
-const contractSchema = {
+export const contractSchema = {
   type: "object",
   additionalProperties: false,
   required: ["parties","rules","warnings","conflicts"],
