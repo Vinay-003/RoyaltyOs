@@ -1,0 +1,41 @@
+{
+  "name": "royaltyos",
+  "version": "1.0.1",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node --experimental-strip-types --watch apps/api/server.ts",
+    "start": "node dist/apps/api/server.js",
+    "worker": "node dist/apps/workflows/worker.js",
+    "test": "node --experimental-strip-types --test tests/unit/*.test.ts tests/financial/*.test.ts tests/security/*.test.ts tests/ai-redteam/*.test.ts tests/integration/*.test.ts",
+    "test:db": "node scripts/db-harness.mjs",
+    "test:security": "npm run security:secret-scan && npm run test:security:unit && npm run test:db:security",
+    "test:security:unit": "node --experimental-strip-types --test tests/security/*.test.ts tests/ai-redteam/*.test.ts",
+    "test:db:security": "node scripts/db-harness.mjs --security",
+    "test:unit": "node --experimental-strip-types --test tests/unit/*.test.ts tests/financial/*.test.ts tests/security/*.test.ts tests/ai-redteam/*.test.ts",
+    "test:integration": "node --experimental-strip-types --test tests/integration/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && node scripts/copy-web.mjs",
+    "db:check": "node --experimental-strip-types scripts/check-migrations.ts",
+    "verify": "npm run typecheck && npm run db:check && npm run security:secret-scan && npm test && npm run build",
+    "dev:worker": "node --experimental-strip-types --watch apps/workflows/worker.ts",
+    "start:source": "node --experimental-strip-types apps/api/server.ts",
+    "worker:source": "node --experimental-strip-types apps/workflows/worker.ts",
+    "smoke:external": "node scripts/external-smoke.mjs",
+    "test:external": "node scripts/external-provider-check.mjs",
+    "db:push": "supabase db push",
+    "db:reset:local": "supabase db reset",
+    "env:check": "node scripts/env-check.mjs",
+    "release:report": "node scripts/release-report.mjs",
+    "release:checksums": "node scripts/release-checksums.mjs",
+    "security:secret-scan": "node scripts/secret-scan.mjs"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1",
+    "pg": "^8.23.1",
+    "typescript": "5.8.3"
+  }
+}

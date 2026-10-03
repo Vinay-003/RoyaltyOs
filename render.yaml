@@ -1,0 +1,122 @@
+services:
+  - type: web
+    name: royaltyos-api
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: npm install --no-audit --no-fund && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: false
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: NODE_ENV
+        value: production
+      - key: APP_VERSION
+        value: 1.0.1
+      - key: APP_BASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: royaltyos-contracts
+      - key: PAYPAL_ENVIRONMENT
+        value: sandbox
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-6-astra
+      - key: AI_PROVIDER
+        value: openai
+      - key: PAYPAL_AI_ENABLED
+        value: true
+      - key: PAYPAL_MCP_SERVER_URL
+        value: https://mcp.sandbox.paypal.com/http
+      - key: MALWARE_SCAN_MODE
+        value: clamav
+      - key: CLAMAV_HOST
+        fromService:
+          type: pserv
+          name: royaltyos-clamav
+          property: host
+      - key: CLAMAV_PORT
+        value: 3310
+      - key: CORS_ORIGINS
+        sync: false
+
+  - type: worker
+    name: royaltyos-worker
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: npm install --no-audit --no-fund && npm run build
+    startCommand: npm run worker
+    autoDeploy: false
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: NODE_ENV
+        value: production
+      - key: APP_VERSION
+        value: 1.0.1
+      - key: APP_BASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: royaltyos-contracts
+      - key: PAYPAL_ENVIRONMENT
+        value: sandbox
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-6-astra
+      - key: AI_PROVIDER
+        value: openai
+      - key: PAYPAL_AI_ENABLED
+        value: true
+      - key: PAYPAL_MCP_SERVER_URL
+        value: https://mcp.sandbox.paypal.com/http
+      - key: MALWARE_SCAN_MODE
+        value: clamav
+      - key: CLAMAV_HOST
+        fromService:
+          type: pserv
+          name: royaltyos-clamav
+          property: host
+      - key: CLAMAV_PORT
+        value: 3310
+      - key: NOTIFICATION_PROVIDER
+        value: disabled
+
+  - type: pserv
+    name: royaltyos-clamav
+    runtime: image
+    plan: 1c-2g
+    region: singapore
+    image:
+      url: docker.io/clamav/clamav:stable
+    envVars:
+      - key: CLAMAV_NO_FRESHCLAMD
+        value: "false"
