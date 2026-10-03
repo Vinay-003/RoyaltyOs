@@ -4,7 +4,7 @@
  *
  * Boots a throwaway PostgreSQL cluster (no Docker required), creates the
  * Supabase-compatible roles/schemas the migrations expect, applies every
- * migration from scratch to `royaltyos_test` and the pre-1.0.1 migrations to
+ * migration from scratch to `royaltyos_test` and the pre-release migrations to
  * `royaltyos_test_upgrade` (so the upgrade path can be exercised), runs
  * `tests/database/*.test.ts`, then destroys the cluster again.
  *
@@ -208,15 +208,15 @@ async function main() {
   console.log(`[db-harness] created ${TEST_DB} and ${UPGRADE_DB}`);
 
   const files = migrationFiles();
-  const preV101 = files.filter((file) => !file.includes("_v101"));
+  const preRelease = files.filter((file) => !file.includes("_v102"));
 
   // Supabase-compatible roles are cluster-wide; schema stubs and grants are per database.
   bootstrapDatabase(psql, [urlWithDatabase(serverUrl, "postgres")]);
   for (const database of [TEST_DB, UPGRADE_DB]) bootstrapDatabase(psql, [urlWithDatabase(serverUrl, database)]);
 
-  applyMigrations(psql, [urlWithDatabase(serverUrl, UPGRADE_DB)], preV101, "upgrade database (pre-1.0.1)");
+  applyMigrations(psql, [urlWithDatabase(serverUrl, UPGRADE_DB)], preRelease, "upgrade database (pre-1.0.2)");
   applyMigrations(psql, [urlWithDatabase(serverUrl, TEST_DB)], files, "fresh database");
-  console.log(`[db-harness] applied ${files.length} migrations to ${TEST_DB} (${preV101.length} to ${UPGRADE_DB})`);
+  console.log(`[db-harness] applied ${files.length} migrations to ${TEST_DB} (${preRelease.length} to ${UPGRADE_DB})`);
 
   env.ROYALTYOS_TEST_DBURL = urlWithDatabase(serverUrl, TEST_DB);
   env.ROYALTYOS_TEST_UPGRADE_DBURL = urlWithDatabase(serverUrl, UPGRADE_DB);

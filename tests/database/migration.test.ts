@@ -23,6 +23,12 @@ test("fresh database has the expected schema, release version and hardening", as
   const list = versions.map((row) => row.version);
   assert.ok(list.includes("1.0.0"), "the 1.0.0 release record exists");
   assert.ok(list.includes("1.0.1"), "the 1.0.1 release record exists");
+  assert.ok(list.includes("1.0.2"), "the 1.0.2 release record exists");
+
+  const digest = await one<{ digest: string }>(
+    `select encode(public.digest('supabase-compat-probe', 'sha256'), 'hex') as digest`,
+  );
+  assert.match(digest!.digest, /^[a-f0-9]{64}$/, "pgcrypto digest is visible in public on any host");
 
   const extension = await one<{ count: string }>(`select count(*) from pg_extension where extname='pgcrypto'`);
   assert.equal(Number(extension!.count), 1, "pgcrypto is available for SHA-256 hashing");
@@ -57,23 +63,23 @@ test("every migration file is wrapped in a transaction so failures cannot half-a
   }
 });
 
-test("upgrade path: pre-1.0.1 database gains the v1.0.1 hardening", async () => {
-  // The harness migrated this database up to (excluding) v1.0.1.
-  const upgradeState = spawnSync(psql, [upgradeDbUrl, "-tAc", "select count(*) from app_versions where version='1.0.1'"], {
+test("upgrade path: pre-1.0.2 database gains the v1.0.2 Supabase compatibility fix", async () => {
+  // The harness migrated this database up to (excluding) v1.0.2.
+  const upgradeState = spawnSync(psql, [upgradeDbUrl, "-tAc", "select count(*) from app_versions where version='1.0.2'"], {
     encoding: "utf8",
   });
-  assert.equal(upgradeState.stdout.trim(), "0", "upgrade database starts at v1.0.0");
+  assert.equal(upgradeState.stdout.trim(), "0", "upgrade database starts at v1.0.1");
 
-  const v101 = migrationFiles().find((file) => file.includes("_v101"));
-  assert.ok(v101, "the v1.0.1 migration exists");
-  const applied = applyFile(upgradeDbUrl, v101!);
+  const v102 = migrationFiles().find((file) => file.includes("_v102"));
+  assert.ok(v102, "the v1.0.2 migration exists");
+  const applied = applyFile(upgradeDbUrl, v102!);
   if (applied.status !== 0) console.error(applied.stderr);
-  assert.equal(applied.status, 0, "v1.0.1 migration applies on an existing v1.0.0 database");
+  assert.equal(applied.status, 0, "v1.0.2 migration applies on an existing v1.0.1 database");
 
   const after = spawnSync(psql, [upgradeDbUrl, "-tAc", "select string_agg(version, ',' order by version) from app_versions"], {
     encoding: "utf8",
   });
-  assert.ok(after.stdout.includes("1.0.1"), "upgrade records the new release version");
+  assert.ok(after.stdout.includes("1.0.2"), "upgrade records the new release version");
 
   const privileges = spawnSync(
     psql,
