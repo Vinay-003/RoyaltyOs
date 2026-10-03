@@ -14,6 +14,7 @@ import {
 import {
   calculateAndCommitSettlement,
   paypalWebhookPayloadHash,
+  reconcileInvoiceState,
 } from "../services.ts";
 import { sha256Hex } from "../../../packages/core/hash.ts";
 import { buildPayoutIdempotencyKey } from "../../../packages/paypal/idempotency.ts";
@@ -77,6 +78,51 @@ export async function handleFinanceRoutes(
     const rows = await ctx.supabase.update<Record<string, any>>("invoices", { status: authoritative.status ?? "SENT", recipient_view_url: authoritative?.detail?.metadata?.recipient_view_url ?? invoice.recipient_view_url, updated_at: new Date().toISOString() }, { id: `eq.${match.id}` });
     await ctx.supabase.rpc("royaltyos_append_audit", { p_workspace_id: auth.workspaceId, p_actor_id: auth.user.id, p_action: "INVOICE_SENT", p_resource_type: "INVOICE", p_resource_id: match.id, p_detail: `PayPal invoice ${invoice.paypal_invoice_id} sent`, p_correlation_id: sendRequestId });
     json(res, 200, rows[0]);
+    return true;
+  }
+
+  match = routeMatch("/api/v1/invoices/:id/refresh", path);
+  if (match && method === "POST") {
+    // Manual authoritative refresh: a lost PayPal webhook can never strand an
+    // invoice. Replays the worker's reconcile decision deterministically; the
+    // revenue RPC is idempotent, so refreshing twice is safe.
+    const auth = await authorizeByResource(ctx, req, "invoices", match.id!, FINANCE_ROLES);
+    const invoice = (await ctx.supabase.select<Record<string, any>>("invoices", { select: "*", id: `eq.${match.id}`, limit: "1" }))[0];
+    if (!invoice) throw statusError(404, "Invoice not found");
+    const authoritative = await ctx.paypal.getInvoice(String(invoice.paypal_invoice_id));
+    const reconciled = reconcileInvoiceState(
+      { amountMinor: Number(invoice.amount_minor), currency: String(invoice.currency), viewUrl: invoice.recipient_view_url ?? null },
+      authoritative,
+    );
+    const rows = await ctx.supabase.update<Record<string, any>>("invoices", {
+      status: reconciled.status,
+      recipient_view_url: reconciled.viewUrl,
+      last_reconciled_at: new Date().toISOString(),
+      reconciliation_status: reconciled.matched ? "MATCHED" : "MISMATCH",
+      updated_at: new Date().toISOString(),
+    }, { id: `eq.${match.id}` });
+    if (reconciled.status === "PAID") {
+      if (!reconciled.matched) throw statusError(409, "Invoice amount or currency mismatch with PayPal");
+      await ctx.supabase.rpc("royaltyos_record_invoice_revenue", {
+        p_invoice_id: invoice.id,
+        p_paypal_invoice_id: String(invoice.paypal_invoice_id),
+        p_amount_minor: reconciled.amountMinor,
+        p_currency: reconciled.currency,
+        p_received_at: new Date().toISOString(),
+        p_revenue_category: null,
+      });
+      try {
+        await calculateAndCommitSettlement(ctx, {
+          revenueEventId: String((await ctx.supabase.select<Record<string, any>>("revenue_events", {
+            select: "id", workspace_id: `eq.${auth.workspaceId}`, source: "eq.PAYPAL_INVOICE",
+            external_id: `eq.${String(invoice.paypal_invoice_id)}`, limit: "1",
+          }))[0]?.id),
+          actorId: auth.user.id,
+        });
+      } catch (error) { console.error("Automatic settlement after manual refresh failed", error); }
+    }
+    await ctx.supabase.rpc("royaltyos_append_audit", { p_workspace_id: auth.workspaceId, p_actor_id: auth.user.id, p_action: "INVOICE_REFRESHED", p_resource_type: "INVOICE", p_resource_id: match.id, p_detail: `PayPal invoice ${invoice.paypal_invoice_id} refreshed: ${reconciled.status}`, p_correlation_id: null });
+    json(res, 200, (await ctx.supabase.select<Record<string, any>>("invoices", { select: "*", id: `eq.${match.id}`, limit: "1" }))[0] ?? rows[0]);
     return true;
   }
 

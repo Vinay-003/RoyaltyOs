@@ -443,3 +443,24 @@ export function parsePayPalInvoiceAmount(invoice: Record<string, any>) {
 export function paypalWebhookPayloadHash(raw: Uint8Array) {
   return sha256Hex(raw);
 }
+
+/**
+ * Reconciles a local invoice row against authoritative PayPal state (shared
+ * by the webhook worker and the manual refresh route, so a lost webhook can
+ * never strand an invoice: Refresh replays the same decision deterministically).
+ */
+export function reconcileInvoiceState(
+  local: { amountMinor: number; currency: string; viewUrl: string | null },
+  authoritative: Record<string, any>,
+): { status: string; viewUrl: string | null; matched: boolean; amountMinor: number; currency: string } {
+  const amount = parsePayPalInvoiceAmount(authoritative);
+  const status = String(authoritative.status ?? "SENT");
+  const viewUrl = authoritative?.detail?.metadata?.recipient_view_url ?? local.viewUrl;
+  return {
+    status,
+    viewUrl,
+    matched: Number(local.amountMinor) === amount.amountMinor && String(local.currency) === amount.currency,
+    amountMinor: amount.amountMinor,
+    currency: amount.currency,
+  };
+}
