@@ -15,7 +15,7 @@ import { settlements } from "./pages/settlements.js";
 import { simulator } from "./pages/simulator.js";
 import { state } from "./state.js";
 import { team } from "./pages/team.js";
-import { esc, hero, path } from "./utils.js";
+import { esc, hero, loadingView, path } from "./utils.js";
 
 export function navTo(p){history.pushState({},"",p);render()}
 
@@ -23,6 +23,7 @@ export async function render(){
   if(!state.me){const me=await loadMe();if(!me){loginView();return}}
   try{
     const p=path();
+    shell(loadingView(p),"Loading");
     if(p==="/")return await overview();
     if(p==="/insights")return await insights();
     if(p==="/contracts")return await contracts();
