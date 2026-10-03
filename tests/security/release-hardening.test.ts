@@ -6,6 +6,7 @@ import { testConfig } from "../helpers.ts";
 
 const release = readFileSync("supabase/migrations/202610030005_royaltyos_v100_release.sql", "utf8");
 const render = readFileSync("render.yaml", "utf8");
+const renderPaid = readFileSync("render.paid.yaml", "utf8");
 const envExample = readFileSync(".env.example", "utf8");
 
 test("v1.0 release migration tracks reconciliation issues and financial integrity", () => {
@@ -17,12 +18,22 @@ test("v1.0 release migration tracks reconciliation issues and financial integrit
   assert.match(release, /dedupe_key/i);
 });
 
-test("Render blueprint keeps secrets external and provisions a private ClamAV service", () => {
-  assert.match(render, /type:\s*pserv[\s\S]*royaltyos-clamav/i);
-  assert.match(render, /docker\.io\/clamav\/clamav:stable/i);
-  assert.match(render, /MALWARE_SCAN_MODE[\s\S]*clamav/i);
+test("Render free blueprint keeps secrets external and stays fail-open-safe without ClamAV", () => {
+  assert.match(render, /plan:\s*free/i);
+  assert.match(render, /startCommand:\s*npm run start:free/i);
+  assert.match(render, /NODE_ENV[\s\S]*staging/i);
+  assert.match(render, /MALWARE_SCAN_MODE[\s\S]*disabled/i);
   assert.match(render, /PAYPAL_CLIENT_SECRET[\s\S]*sync:\s*false/i);
   assert.equal(render.includes("YOUR_PAYPAL"), false);
+  assert.equal(/type:\s*pserv/i.test(render), false, "free tier has no private services");
+});
+
+test("Render paid blueprint provisions a private ClamAV service", () => {
+  assert.match(renderPaid, /type:\s*pserv[\s\S]*royaltyos-clamav/i);
+  assert.match(renderPaid, /docker\.io\/clamav\/clamav:stable/i);
+  assert.match(renderPaid, /MALWARE_SCAN_MODE[\s\S]*clamav/i);
+  assert.match(renderPaid, /PAYPAL_CLIENT_SECRET[\s\S]*sync:\s*false/i);
+  assert.equal(renderPaid.includes("YOUR_PAYPAL"), false);
 });
 
 test("PayPal remote MCP defaults to Streamable HTTP and is read-only", () => {

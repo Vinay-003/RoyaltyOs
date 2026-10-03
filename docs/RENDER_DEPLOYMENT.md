@@ -1,12 +1,22 @@
 # Render Deployment
 
-`render.yaml` provisions three services in the Singapore region:
-
-1. `royaltyos-api` - public Node web/API service
-2. `royaltyos-worker` - background outbox/reconciliation worker
-3. `royaltyos-clamav` - private ClamAV service for production contract uploads
+`render.yaml` is the **free-tier** blueprint: one Node web service in the Singapore
+region running the API plus the outbox worker in one process group
+(`npm run start:free`, see `scripts/start-free.mjs`). The paid three-service
+layout (API + worker + private ClamAV) is kept in `render.paid.yaml`.
 
 Supabase remains the managed PostgreSQL/Auth/Storage provider.
+
+## Free-tier notes and limits
+
+- Free web services **sleep after ~15 minutes without traffic** and cold-start in
+  ~30-60s. Inbound PayPal webhooks wake the service; the worker then drains the
+  outbox. For Sandbox acceptance this is fine; do not run production money here.
+- `NODE_ENV=staging` (not `production`): production fail-closes contract uploads
+  without ClamAV, so the free blueprint runs staging with
+  `MALWARE_SCAN_MODE=disabled`. Uploads are PDF-validated but not virus-scanned.
+- No private ClamAV service and no separate worker exist on free. Before handling
+  real money, deploy `render.paid.yaml` instead and complete a security review.
 
 ## Before deploying
 

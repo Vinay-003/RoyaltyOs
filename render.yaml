@@ -1,18 +1,24 @@
+# Free-tier blueprint: ONE web service (API + worker via npm run start:free).
+# Render free has no background workers or private services, so:
+# - NODE_ENV=staging (production would fail-closed contract uploads without ClamAV)
+# - MALWARE_SCAN_MODE=disabled (Sandbox/demo only; see render.paid.yaml for prod)
+# - the outbox worker runs in-process-group alongside the API (scripts/start-free.mjs)
+# Paid three-service layout (api + worker + private ClamAV) is kept in render.paid.yaml.
 services:
   - type: web
     name: royaltyos-api
     runtime: node
-    plan: starter
+    plan: free
     region: singapore
     buildCommand: npm install --no-audit --no-fund && npm run build
-    startCommand: npm start
+    startCommand: npm run start:free
     healthCheckPath: /api/health
     autoDeploy: false
     envVars:
       - key: NODE_VERSION
         value: 22
       - key: NODE_ENV
-        value: production
+        value: staging
       - key: APP_VERSION
         value: 1.0.1
       - key: APP_BASE_URL
@@ -46,81 +52,6 @@ services:
       - key: PAYPAL_MCP_SERVER_URL
         value: https://mcp.sandbox.paypal.com/http
       - key: MALWARE_SCAN_MODE
-        value: clamav
-      - key: CLAMAV_HOST
-        fromService:
-          type: pserv
-          name: royaltyos-clamav
-          property: host
-      - key: CLAMAV_PORT
-        value: 3310
+        value: disabled
       - key: CORS_ORIGINS
         sync: false
-
-  - type: worker
-    name: royaltyos-worker
-    runtime: node
-    plan: starter
-    region: singapore
-    buildCommand: npm install --no-audit --no-fund && npm run build
-    startCommand: npm run worker
-    autoDeploy: false
-    envVars:
-      - key: NODE_VERSION
-        value: 22
-      - key: NODE_ENV
-        value: production
-      - key: APP_VERSION
-        value: 1.0.1
-      - key: APP_BASE_URL
-        sync: false
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_ANON_KEY
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-      - key: SUPABASE_STORAGE_BUCKET
-        value: royaltyos-contracts
-      - key: PAYPAL_ENVIRONMENT
-        value: sandbox
-      - key: PAYPAL_CLIENT_ID
-        sync: false
-      - key: PAYPAL_CLIENT_SECRET
-        sync: false
-      - key: PAYPAL_WEBHOOK_ID
-        sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: OPENAI_BASE_URL
-        sync: false
-      - key: OPENAI_MODEL
-        sync: false
-      - key: AI_PROVIDER
-        value: openai
-      - key: PAYPAL_AI_ENABLED
-        value: true
-      - key: PAYPAL_MCP_SERVER_URL
-        value: https://mcp.sandbox.paypal.com/http
-      - key: MALWARE_SCAN_MODE
-        value: clamav
-      - key: CLAMAV_HOST
-        fromService:
-          type: pserv
-          name: royaltyos-clamav
-          property: host
-      - key: CLAMAV_PORT
-        value: 3310
-      - key: NOTIFICATION_PROVIDER
-        value: disabled
-
-  - type: pserv
-    name: royaltyos-clamav
-    runtime: image
-    plan: 1c-2g
-    region: singapore
-    image:
-      url: docker.io/clamav/clamav:stable
-    envVars:
-      - key: CLAMAV_NO_FRESHCLAMD
-        value: "false"

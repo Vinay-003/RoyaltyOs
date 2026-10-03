@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "node --experimental-strip-types --watch apps/api/server.ts",
     "start": "node dist/apps/api/server.js",
+    "start:free": "node scripts/start-free.mjs",
     "worker": "node dist/apps/workflows/worker.js",
     "test": "node --experimental-strip-types --test tests/unit/*.test.ts tests/financial/*.test.ts tests/security/*.test.ts tests/ai-redteam/*.test.ts tests/integration/*.test.ts",
     "test:db": "node scripts/db-harness.mjs",
