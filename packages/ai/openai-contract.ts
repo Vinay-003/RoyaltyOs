@@ -162,7 +162,7 @@ export async function extractContractWithOpenAI(
     type: "input_text",
     text: `The preceding PDF is the current contract version ${input.documentVersion}. Extract the executable revenue-sharing terms that should be reviewed for this version. Compare it against supplied prior versions. Include exact source_version, source_document, page/clause evidence. If an amendment supersedes an earlier clause, surface the relationship in conflicts and never silently choose when precedence is ambiguous. Do not calculate a payout.`,
   });
-  const response = await fetchWithRetry(fetchImpl, "https://api.openai.com/v1/responses", {
+  const response = await fetchWithRetry(fetchImpl, `${config.ai.baseUrl}/responses`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${config.ai.openaiApiKey}`,

@@ -23,7 +23,7 @@ export async function runPayPalReadOnlyAssistant(
     throw new Error("PayPal AI assistant is intentionally read-only; use the explicit RoyaltyOS financial workflow for mutations");
   }
   const accessToken = await gateway.getAccessToken();
-  const response = await fetchWithRetry(fetchImpl, "https://api.openai.com/v1/responses", {
+  const response = await fetchWithRetry(fetchImpl, `${config.ai.baseUrl}/responses`, {
     method: "POST",
     headers: { Authorization: `Bearer ${config.ai.openaiApiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({

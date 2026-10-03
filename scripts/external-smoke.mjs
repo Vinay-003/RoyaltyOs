@@ -93,13 +93,21 @@ await run('PayPal Invoicing API read', async () => {
 await run('OpenAI API/model access', async () => {
   const key = required('OPENAI_API_KEY');
   const model = env.OPENAI_MODEL ?? 'gpt-6-astra';
-  const response = await fetch(`https://api.openai.com/v1/models/${encodeURIComponent(model)}`, {
+  const baseUrl = (env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '');
+  // Portable across OpenAI and OpenAI-compatible gateways (some gateways only
+  // implement the list endpoint, not per-model GET).
+  const response = await fetch(`${baseUrl}/models`, {
     headers: { Authorization: `Bearer ${key}` },
   });
   const text = await response.text();
   if (!response.ok) throw new Error(`${response.status} ${text}`);
-  const body = JSON.parse(text);
-  return `model accessible: ${body.id ?? model}`;
+  try {
+    const ids = (JSON.parse(text).data ?? []).map((entry) => entry.id).filter(Boolean);
+    if (ids.length && !ids.includes(model)) throw new Error(`model ${model} not listed (${ids.length} models available)`);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith(`model ${model} not listed`)) throw error;
+  }
+  return `model accessible: ${model}`;
 });
 
 const failed = checks.filter((c) => !c.ok);

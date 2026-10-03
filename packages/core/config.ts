@@ -51,6 +51,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     ai: {
       provider: env.AI_PROVIDER ?? "openai",
       openaiApiKey: required("OPENAI_API_KEY", env),
+      baseUrl: (env.OPENAI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/$/, ""),
       model: env.OPENAI_MODEL ?? "gpt-6-astra",
       pdfDetail: (env.OPENAI_PDF_DETAIL ?? "low") as "low" | "auto" | "high",
       maxPdfBytes: optionalInt("AI_MAX_PDF_BYTES", 10 * 1024 * 1024, env),

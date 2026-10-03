@@ -47,7 +47,7 @@ A local PayPal MCP package (`@paypal/mcp`) and PayPal Agent Toolkit (`@paypal/ag
 
 Contract intelligence:
 
-- OpenAI Responses API
+- OpenAI Responses API (or an OpenAI-compatible gateway via `OPENAI_BASE_URL`, default `https://api.openai.com/v1`)
 - native PDF `input_file`
 - strict JSON-schema Structured Outputs
 - default model: `gpt-6-astra` (configurable with `OPENAI_MODEL`)

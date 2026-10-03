@@ -46,15 +46,17 @@ await run('Application /insights SPA route', async () => {
   return 'SPA fallback works';
 });
 
+const openaiBaseUrl = (env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '');
+
 if (paidAi) {
   await run('OpenAI Responses minimal call', async () => {
     const key = env.OPENAI_API_KEY;
     if (!key) throw new Error('OPENAI_API_KEY missing');
     const model = env.OPENAI_MODEL ?? 'gpt-6-astra';
-    const response = await fetch('https://api.openai.com/v1/responses', {
+    const response = await fetch(`${openaiBaseUrl}/responses`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, store: false, input: 'Reply with exactly ROYALTYOS_OK', max_output_tokens: 20 }),
+      body: JSON.stringify({ model, store: false, input: 'Reply with exactly ROYALTYOS_OK', max_output_tokens: 300 }),
     });
     const text = await response.text();
     if (!response.ok) throw new Error(`${response.status} ${text}`);
@@ -81,7 +83,7 @@ if (mcpAi) {
     });
     const oauthBody = await oauth.json();
     if (!oauth.ok || !oauthBody.access_token) throw new Error(`PayPal OAuth ${oauth.status}`);
-    const response = await fetch('https://api.openai.com/v1/responses', {
+    const response = await fetch(`${openaiBaseUrl}/responses`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
