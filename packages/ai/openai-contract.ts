@@ -1,6 +1,11 @@
 import type { AppConfig } from "../core/config.ts";
 import { fetchWithRetry } from "../core/http-retry.ts";
 import type { CandidateRule, RuleCondition, RuleType } from "../core/types.ts";
+import { documentTextBlock, extractPdfPageTexts } from "./pdf-text.ts";
+
+// Upper bound on contract characters sent per extraction call. The demo
+// agreements are ~1 KB; this cap only bites on hundred-page filings.
+const MAX_EXTRACTION_CHARS = 120_000;
 
 const RULE_TYPES = [
   "PERCENTAGE","FIXED_AMOUNT","RECOUPMENT","CAP","FLOOR","EXCLUSION","RESERVE","PRIORITY","THRESHOLD","DATE_RANGE","REVENUE_CATEGORY","UNSUPPORTED"
@@ -137,30 +142,30 @@ export async function extractContractWithOpenAI(
   },
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ extraction: ContractExtraction; model: string; rawResponseId: string | null }> {
-  const fileData = `data:application/pdf;base64,${Buffer.from(input.bytes).toString("base64")}`;
+  const serverWarnings: string[] = [];
+  const readDocument = async (filename: string, bytes: Uint8Array, documentVersion: number) => {
+    const { pages, truncated } = await extractPdfPageTexts(bytes, config.ai.maxPdfPages);
+    if (truncated) serverWarnings.push(`Document ${filename} exceeds the page cap; only the first ${pages.length} pages were sent for extraction.`);
+    return { pages, truncated };
+  };
+  const current = await readDocument(input.filename, input.bytes, input.documentVersion);
   const priorDocuments = (input.priorDocuments ?? []).slice(-3);
   const content: Array<Record<string, unknown>> = [];
   for (const prior of priorDocuments) {
-    content.push({
-      type: "input_file",
-      filename: `v${prior.documentVersion}-${prior.filename}`,
-      file_data: `data:application/pdf;base64,${Buffer.from(prior.bytes).toString("base64")}`,
-      detail: config.ai.pdfDetail,
-    });
+    const priorText = await readDocument(prior.filename, prior.bytes, prior.documentVersion);
     content.push({
       type: "input_text",
-      text: `The preceding PDF is prior contract version ${prior.documentVersion}. Use it only as agreement history to detect superseded, contradictory, or amended terms.`,
+      text: `The following contract text is PRIOR contract version ${prior.documentVersion}. Use it only as agreement history to detect superseded, contradictory, or amended terms.\n\n${documentTextBlock("Prior", prior.filename, prior.documentVersion, priorText.pages)}`,
     });
   }
-  content.push({
-    type: "input_file",
-    filename: `v${input.documentVersion}-${input.filename}`,
-    file_data: fileData,
-    detail: config.ai.pdfDetail,
-  });
+  let currentBlock = documentTextBlock("Current", input.filename, input.documentVersion, current.pages);
+  if (currentBlock.length > MAX_EXTRACTION_CHARS) {
+    currentBlock = `${currentBlock.slice(0, MAX_EXTRACTION_CHARS)}\n[TRUNCATED: document exceeds the extraction character budget]`;
+    serverWarnings.push(`Document ${input.filename} exceeds the extraction character budget; text was truncated.`);
+  }
   content.push({
     type: "input_text",
-    text: `The preceding PDF is the current contract version ${input.documentVersion}. Extract the executable revenue-sharing terms that should be reviewed for this version. Compare it against supplied prior versions. Include exact source_version, source_document, page/clause evidence. If an amendment supersedes an earlier clause, surface the relationship in conflicts and never silently choose when precedence is ambiguous. Do not calculate a payout.`,
+    text: `The following contract text is the CURRENT contract version ${input.documentVersion}. Extract the executable revenue-sharing terms that should be reviewed for this version. Compare it against supplied prior versions. Include exact source_version, source_document, page/clause evidence. If an amendment supersedes an earlier clause, surface the relationship in conflicts and never silently choose when precedence is ambiguous. Do not calculate a payout. If no contract text is present below, return empty rules with a warning instead of inventing terms. Key formatting rules: beneficiary_key is REQUIRED for every rule that pays someone and must be the snake_case payee name (Artist becomes artist, Featured Creator becomes featured_creator); use reserve for remainder rules and null only for rules with no payee. A rate that applies to one revenue category MUST use type REVENUE_CATEGORY with config.category set, never PERCENTAGE. Never emit EXCLUSION without an explicit amountMinor.\n\n${currentBlock}`,
   });
   const response = await fetchWithRetry(fetchImpl, `${config.ai.baseUrl}/responses`, {
     method: "POST",
@@ -199,7 +204,32 @@ export async function extractContractWithOpenAI(
   const text = outputText(body);
   if (!text) throw new Error("OpenAI returned no structured contract output");
   const extraction = JSON.parse(text) as ContractExtraction;
+  for (const warning of serverWarnings) extraction.warnings.push(warning);
   return { extraction, model: config.ai.model, rawResponseId: typeof body.id === "string" ? body.id : null };
+}
+
+/** Normalizes a model-provided key (Artist and Featured Creator both occur). */
+export function normalizeBeneficiaryKey(raw: unknown): string | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const key = raw.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return key || null;
+}
+
+/** snake_case party-name fallback so rules never ship with a null payee key. */
+export function inferBeneficiaryKey(
+  parties: Array<{ name: string }>,
+  sourceText: string,
+  clause: string | null,
+): string | null {
+  const haystacks = `${sourceText}\n${clause ?? ""}`.toLowerCase();
+  const names = [...new Set(parties.map((p) => p.name).filter((n) => typeof n === "string" && n.trim()))]
+    .sort((a, b) => b.length - a.length);
+  for (const name of names) {
+    if (name.trim().length > 1 && haystacks.includes(name.trim().toLowerCase())) {
+      return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    }
+  }
+  return null;
 }
 
 export function extractionToCandidates(input: {
@@ -218,7 +248,12 @@ export function extractionToCandidates(input: {
   return input.extraction.rules.map((raw, index) => ({
     id: input.idFactory(),
     type: (RULE_TYPES.includes(raw.type) ? raw.type : "UNSUPPORTED") as RuleType | "UNSUPPORTED",
-    beneficiaryKey: typeof raw.beneficiary_key === "string" ? raw.beneficiary_key : null,
+    beneficiaryKey: normalizeBeneficiaryKey(raw.beneficiary_key)
+      ?? inferBeneficiaryKey(
+        input.extraction.parties,
+        typeof raw.source_text === "string" ? raw.source_text : "",
+        typeof raw.clause === "string" ? raw.clause : null,
+      ),
     base: ["GROSS_REVENUE","NET_REVENUE","REMAINDER"].includes(raw.base) ? raw.base : "NET_REVENUE",
     rateBasisPoints: Number.isInteger(raw.rate_basis_points) ? raw.rate_basis_points : null,
     fixedMinor: Number.isSafeInteger(raw.fixed_minor) ? raw.fixed_minor : null,

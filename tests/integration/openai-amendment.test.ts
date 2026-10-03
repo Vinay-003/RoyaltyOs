@@ -21,9 +21,9 @@ test("contract intelligence sends prior versions to detect amendments and confli
       { filename: "agreement-v2.pdf", bytes: minimalPdf("second"), documentVersion: 2 },
     ],
   }, fetchImpl as any);
-  const content = body.input[0].content;
-  const files = content.filter((item: any) => item.type === "input_file");
-  assert.deepEqual(files.map((item: any) => item.filename), ["v1-agreement.pdf", "v2-agreement-v2.pdf", "v3-agreement-amendment.pdf"]);
+  const texts = body.input[0].content.map((item: any) => item.text).join("\n");
+  assert.match(texts, /PRIOR contract version 1[\s\S]*original/);
+  assert.match(texts, /PRIOR contract version 2[\s\S]*second/);
+  assert.match(texts, /CURRENT contract version 3[\s\S]*amendment/);
   assert.match(body.instructions, /contradictions, amendments and superseding language/i);
-  assert.match(content.at(-1).text, /current contract version 3/i);
 });

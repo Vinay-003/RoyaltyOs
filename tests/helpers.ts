@@ -21,6 +21,25 @@ export function testConfig(overrides: Record<string, string> = {}) {
 }
 
 export function minimalPdf(extra = "") {
-  const content = `%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R >>\nendobj\n${extra}\n%%EOF\n`;
-  return new TextEncoder().encode(content);
+  // A genuinely parseable single-page PDF: server-side text extraction
+  // (pdf.js) must be able to read test fixtures, not just magic bytes.
+  const safe = extra.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+  const stream = `BT /F1 12 Tf 72 720 Td (${safe || "RoyaltyOS test document."}) Tj ET\n`;
+  const objects = [
+    `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`,
+    `2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n`,
+    `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n`,
+    `4 0 obj\n<< /Length ${stream.length} >>\nstream\n${stream}endstream\nendobj\n`,
+    `5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`,
+  ];
+  let pdf = `%PDF-1.7\n`;
+  const offsets = objects.map((obj) => {
+    const at = pdf.length;
+    pdf += obj;
+    return at;
+  });
+  const xrefAt = pdf.length;
+  pdf += `xref\n0 6\n0000000000 65535 f \n${offsets.map((at) => `${String(at).padStart(10, "0")} 00000 n \n`).join("")}`;
+  pdf += `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefAt}\n%%EOF\n`;
+  return new TextEncoder().encode(pdf);
 }

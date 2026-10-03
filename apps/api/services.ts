@@ -262,6 +262,16 @@ export async function analyzeContractVersion(
       status: r.status,
     })), false);
   }
+  console.info(JSON.stringify({
+    level: "info",
+    message: "AI contract extraction finished",
+    contractId: input.contractId,
+    versionId: input.versionId,
+    model: result.model,
+    candidates: candidates.length,
+    warnings: result.extraction.warnings.length,
+    conflicts: result.extraction.conflicts.length,
+  }));
   await ctx.supabase.update("contracts", { status: "REVIEW_REQUIRED" }, { id: `eq.${input.contractId}` }, false);
   await ctx.supabase.rpc("royaltyos_append_audit", {
     p_workspace_id: input.workspaceId,

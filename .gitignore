@@ -4,6 +4,7 @@ node_modules/
 dist/
 .freebuff/
 .kilo/
+.playwright-mcp/
 coverage/
 .DS_Store
 *.log
