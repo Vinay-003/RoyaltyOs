@@ -23,6 +23,42 @@ const SYSTEM_INSTRUCTIONS = [
   "Respond with ONLY the JSON object matching the requested schema: no markdown fences, no tables, no prose.",
 ].join(" ");
 
+const KNOWN_VISION_TYPES = new Set([
+  "PERCENTAGE", "FIXED_AMOUNT", "RECOUPMENT", "CAP", "FLOOR", "EXCLUSION",
+  "RESERVE", "PRIORITY", "THRESHOLD", "DATE_RANGE", "REVENUE_CATEGORY", "UNSUPPORTED",
+]);
+
+/**
+ * Semantic gate mirroring the compiler (INVALID_RATE, MISSING_EVIDENCE):
+ * schema-valid but content-free replies trigger the repair retry instead of
+ * landing six manual Rejects in the review queue.
+ */
+export function assertVisionSemantics(parsed: Record<string, any>): void {
+  const unknownTypes = [...new Set(
+    parsed.rules.map((rule: any) => rule?.type).filter((type: unknown) => typeof type === "string" && !KNOWN_VISION_TYPES.has(type)),
+  )];
+  if (unknownTypes.length) {
+    throw new Error(`reply used unknown rule types (${unknownTypes.join(", ")}); use exactly one of ${[...KNOWN_VISION_TYPES].join(", ")}`);
+  }
+  const problems: string[] = [];
+  parsed.rules.forEach((rule: any, index: number) => {
+    const where = `rule ${index}${rule?.beneficiary_key ? ` (${rule.beneficiary_key})` : ""}`;
+    if (!rule?.evidence?.source_text || !String(rule.evidence.source_text).trim()) {
+      problems.push(`${where} has no evidence.source_text`);
+    }
+    if ((rule?.type === "PERCENTAGE" || rule?.type === "REVENUE_CATEGORY") && !Number.isInteger(rule?.rate_basis_points)) {
+      problems.push(`${where} needs an integer rate_basis_points`);
+    }
+    if (rule?.type === "RECOUPMENT" && !Number.isInteger(rule?.config?.advanceMinor)) {
+      problems.push(`${where} needs config.advanceMinor as an integer`);
+    }
+    if (rule?.type === "FIXED_AMOUNT" && !Number.isSafeInteger(rule?.fixed_minor)) {
+      problems.push(`${where} needs fixed_minor as an integer`);
+    }
+  });
+  if (problems.length) throw new Error(`reply has content-free rules: ${problems.slice(0, 6).join("; ")}`);
+}
+
 /** Parses model output that may arrive wrapped in fences or prose. Throws on failure. */
 export function parseVisionJson(raw: unknown): Record<string, any> {
   if (typeof raw !== "string" || !raw.trim()) throw new Error("vision model returned an empty reply");
@@ -141,16 +177,7 @@ function finish(
   config: AppConfig,
 ): { extraction: ContractExtraction; model: string; rawResponseId: string | null } {
   const parsed = parseVisionJson(text);
-  const knownTypes = new Set([
-    "PERCENTAGE", "FIXED_AMOUNT", "RECOUPMENT", "CAP", "FLOOR", "EXCLUSION",
-    "RESERVE", "PRIORITY", "THRESHOLD", "DATE_RANGE", "REVENUE_CATEGORY", "UNSUPPORTED",
-  ]);
-  const unknownTypes = [...new Set(
-    parsed.rules.map((rule: any) => rule?.type).filter((type: unknown) => typeof type === "string" && !knownTypes.has(type)),
-  )];
-  if (unknownTypes.length) {
-    throw new Error(`reply used unknown rule types (${unknownTypes.join(", ")}); use exactly one of ${[...knownTypes].join(", ")}`);
-  }
+  assertVisionSemantics(parsed);
   const extraction = {
     parties: Array.isArray(parsed.parties) ? parsed.parties : [],
     rules: parsed.rules,

@@ -1,6 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractContractWithVision, parseVisionJson } from "../../packages/ai/vision-contract.ts";
+import { assertVisionSemantics, extractContractWithVision, parseVisionJson } from "../../packages/ai/vision-contract.ts";
+
+test("content-free rules fail the semantic gate", () => {
+  assert.throws(
+    () => assertVisionSemantics({ rules: [{ type: "PERCENTAGE", beneficiary_key: "artist", evidence: {} }] }),
+    /no evidence|integer rate/i,
+  );
+  assert.doesNotThrow(() => assertVisionSemantics({
+    rules: [{
+      type: "PERCENTAGE", beneficiary_key: "artist", rate_basis_points: 6000,
+      evidence: { source_text: "Artist shall receive sixty percent." },
+    }],
+  }));
+});
 import { minimalPdf, testConfig } from "../helpers.ts";
 
 test("vision replies parse as strict JSON, fenced JSON, or prose-wrapped JSON", () => {
