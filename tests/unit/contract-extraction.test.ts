@@ -1,6 +1,54 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractionToCandidates, inferBeneficiaryKey, normalizeBeneficiaryKey } from "../../packages/ai/openai-contract.ts";
+import { extractContractWithOpenAI, extractionToCandidates, inferBeneficiaryKey, normalizeBeneficiaryKey } from "../../packages/ai/openai-contract.ts";
+import { minimalPdf, minimalPdfPages, testConfig } from "../helpers.ts";
+
+const emptyExtraction = { parties: [], rules: [], warnings: [], conflicts: [] };
+
+function textFetchImpl(replies: string[]) {
+  const calls: any[] = [];
+  return {
+    calls,
+    fetch: (async (_url: any, init: any) => {
+      calls.push(JSON.parse(init.body));
+      const text = replies[Math.min(calls.length - 1, replies.length - 1)];
+      return new Response(JSON.stringify({ id: "resp-x", output_text: text }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as any,
+  };
+}
+
+test("fenced or truncated replies parse without a retry", async () => {
+  const good = JSON.stringify({ ...emptyExtraction, warnings: ["no financial terms in this memo"] });
+  const { calls, fetch } = textFetchImpl([`\`\`\`json\n${good}\n\`\`\``]);
+  const out = await extractContractWithOpenAI(
+    testConfig(), { filename: "memo.pdf", bytes: minimalPdf("a short memo"), documentVersion: 1 }, fetch,
+  );
+  assert.equal(calls.length, 1);
+  assert.deepEqual(out.extraction.warnings, ["no financial terms in this memo"]);
+});
+
+test("an unexplained empty reply triggers exactly one repair retry", async () => {
+  const bigPages = Array.from({ length: 10 }, (_, i) => `Contract memo page ${i + 1} with revenue sharing discussion and royalty terms.`);
+  const honest = JSON.stringify({ ...emptyExtraction, warnings: ["document has no revenue terms"] });
+  const { calls, fetch } = textFetchImpl(['{"rules":[]}', honest]);
+  const out = await extractContractWithOpenAI(
+    testConfig(), { filename: "big.pdf", bytes: minimalPdfPages(bigPages), documentVersion: 1 }, fetch,
+  );
+  assert.equal(calls.length, 2, "one repair retry");
+  assert.match(calls[1].instructions, /rejected|previous reply/i);
+  assert.deepEqual(out.extraction.warnings, ["document has no revenue terms"]);
+});
+
+test("two consecutive bad replies fail loud with the cause", async () => {
+  const { fetch } = textFetchImpl(["not json at all {{{", "still not json }}}"]);
+  await assert.rejects(
+    () => extractContractWithOpenAI(testConfig(), { filename: "a.pdf", bytes: minimalPdf("terms here"), documentVersion: 1 }, fetch),
+    /not valid extraction JSON|Unexpected/i,
+  );
+});
 
 test("model-provided keys are normalized to snake_case", () => {
   assert.equal(normalizeBeneficiaryKey("Artist"), "artist");

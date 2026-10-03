@@ -3,7 +3,7 @@ import { createCanvas } from "@napi-rs/canvas";
 
 export interface PdfPageImage {
   page: number;
-  png: Buffer;
+  png: Uint8Array;
 }
 
 /**

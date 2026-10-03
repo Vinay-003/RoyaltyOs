@@ -33,7 +33,14 @@ const KNOWN_VISION_TYPES = new Set([
  * schema-valid but content-free replies trigger the repair retry instead of
  * landing six manual Rejects in the review queue.
  */
-export function assertVisionSemantics(parsed: Record<string, any>): void {
+export function assertVisionSemantics(parsed: Record<string, any>, sourceChars?: number): void {
+  const warnings = Array.isArray(parsed.warnings) ? parsed.warnings : [];
+  if (Array.isArray(parsed.rules) && parsed.rules.length === 0 && (sourceChars ?? 0) > 500 && !warnings.length) {
+    throw new Error(
+      `reply returned zero rules with no explanation for a document with ${sourceChars} text characters; ` +
+      `either extract the terms or explain in warnings why the document has none`,
+    );
+  }
   const unknownTypes = [...new Set(
     parsed.rules.map((rule: any) => rule?.type).filter((type: unknown) => typeof type === "string" && !KNOWN_VISION_TYPES.has(type)),
   )];
@@ -43,8 +50,9 @@ export function assertVisionSemantics(parsed: Record<string, any>): void {
   const problems: string[] = [];
   parsed.rules.forEach((rule: any, index: number) => {
     const where = `rule ${index}${rule?.beneficiary_key ? ` (${rule.beneficiary_key})` : ""}`;
-    if (!rule?.evidence?.source_text || !String(rule.evidence.source_text).trim()) {
-      problems.push(`${where} has no evidence.source_text`);
+    const sourceText = rule?.evidence?.source_text ?? rule?.source_text;
+    if (!sourceText || !String(sourceText).trim()) {
+      problems.push(`${where} has no evidence source text`);
     }
     if ((rule?.type === "PERCENTAGE" || rule?.type === "REVENUE_CATEGORY") && !Number.isInteger(rule?.rate_basis_points)) {
       problems.push(`${where} needs an integer rate_basis_points`);
@@ -90,7 +98,7 @@ async function readPages(
   config: AppConfig,
   filename: string,
   bytes: Uint8Array,
-): Promise<{ images: Array<{ page: number; png: Buffer }>; truncated: boolean }> {
+): Promise<{ images: Array<{ page: number; png: Uint8Array }>; truncated: boolean }> {
   return await renderPdfPageImages(bytes, config.ai.visionMaxPages);
 }
 
