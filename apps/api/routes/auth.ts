@@ -31,7 +31,11 @@ export async function handleAuthRoutes(
     const email = requireEmail(body.email);
     const password = requireString(body.password, "password", 200);
     if (password.length < 10) throw statusError(400, "Password must be at least 10 characters");
-    const displayName = requireString(body.displayName, "displayName", 120);
+    const displayName = requireString(
+      typeof body.displayName === "string" && body.displayName.trim() ? body.displayName : email.split("@")[0],
+      "displayName",
+      120,
+    );
     const out = await ctx.supabase.signUp(email, password, displayName);
     const tokenLike = out as Record<string, unknown>;
     const hasSession = typeof tokenLike.access_token === "string" && typeof tokenLike.refresh_token === "string";
