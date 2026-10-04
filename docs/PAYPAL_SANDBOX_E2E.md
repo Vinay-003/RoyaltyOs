@@ -58,7 +58,7 @@ Do not use real money or live credentials.
 9. Open **Invoices**. Create a small real Sandbox test invoice first (for example `$10.00`) to your Sandbox buyer email; send it.
 10. Log into the Sandbox buyer and pay the invoice.
 11. Confirm PayPal calls `/api/v1/webhooks/paypal`. The API should verify the signature, store/dedupe the event and enqueue it. The worker must fetch the authoritative invoice and only then create a revenue event.
-12. Open **Settlements**. A deterministic settlement should be created automatically after verified revenue; otherwise use Calculate on the revenue event.
+12. Open **Settlements**. Verified revenue lands as a revenue event; use **Calculate** on it when ready (settlement is a deliberate human action, never automatic, so proposals always reflect reviewed current state). If a proposal goes stale (e.g. the advance moved since calculation and approval refuses), **Void** it and calculate again.
 13. Review settlement line sum, RuleSet hash, algorithm version, payout emails and warnings.
 14. Click Approve. If step-up has expired, re-enter your password.
 15. Execute the PayPal payout.

@@ -103,6 +103,8 @@ export async function handleFinanceRoutes(
     }, { id: `eq.${match.id}` });
     if (reconciled.status === "PAID") {
       if (!reconciled.matched) throw statusError(409, "Invoice amount or currency mismatch with PayPal");
+      // Revenue only: settlement stays a deliberate human action (Calculate),
+      // so proposals are always computed against reviewed, current state.
       await ctx.supabase.rpc("royaltyos_record_invoice_revenue", {
         p_invoice_id: invoice.id,
         p_paypal_invoice_id: String(invoice.paypal_invoice_id),
@@ -111,15 +113,6 @@ export async function handleFinanceRoutes(
         p_received_at: new Date().toISOString(),
         p_revenue_category: null,
       });
-      try {
-        await calculateAndCommitSettlement(ctx, {
-          revenueEventId: String((await ctx.supabase.select<Record<string, any>>("revenue_events", {
-            select: "id", workspace_id: `eq.${auth.workspaceId}`, source: "eq.PAYPAL_INVOICE",
-            external_id: `eq.${String(invoice.paypal_invoice_id)}`, limit: "1",
-          }))[0]?.id),
-          actorId: auth.user.id,
-        });
-      } catch (error) { console.error("Automatic settlement after manual refresh failed", error); }
     }
     await ctx.supabase.rpc("royaltyos_append_audit", { p_workspace_id: auth.workspaceId, p_actor_id: auth.user.id, p_action: "INVOICE_REFRESHED", p_resource_type: "INVOICE", p_resource_id: match.id, p_detail: `PayPal invoice ${invoice.paypal_invoice_id} refreshed: ${reconciled.status}`, p_correlation_id: null });
     json(res, 200, (await ctx.supabase.select<Record<string, any>>("invoices", { select: "*", id: `eq.${match.id}`, limit: "1" }))[0] ?? rows[0]);
@@ -192,6 +185,17 @@ export async function handleFinanceRoutes(
   if (match && method === "POST") {
     const auth = await authorizeByResource(ctx, req, "settlements", match.id!, FINANCE_ROLES, true);
     await ctx.supabase.rpc("royaltyos_approve_settlement", { p_settlement_id: match.id, p_actor_id: auth.user.id });
+    const row = (await ctx.supabase.select<Record<string, any>>("settlements", { select: "*", id: `eq.${match.id}`, limit: "1" }))[0];
+    json(res, 200, row);
+    return true;
+  }
+
+  match = routeMatch("/api/v1/settlements/:id/void", path);
+  if (match && method === "POST") {
+    // Voids a stale proposal so the revenue can be recalculated fresh.
+    // Only unapproved settlements can be voided; voided rows stay visible.
+    const auth = await authorizeByResource(ctx, req, "settlements", match.id!, FINANCE_ROLES, true);
+    await ctx.supabase.rpc("royaltyos_void_settlement", { p_settlement_id: match.id, p_actor_id: auth.user.id });
     const row = (await ctx.supabase.select<Record<string, any>>("settlements", { select: "*", id: `eq.${match.id}`, limit: "1" }))[0];
     json(res, 200, row);
     return true;

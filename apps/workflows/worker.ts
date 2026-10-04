@@ -1,5 +1,5 @@
 import { createAppContext } from "../api/context.ts";
-import { calculateAndCommitSettlement, parsePayPalInvoiceAmount } from "../api/services.ts";
+import { parsePayPalInvoiceAmount } from "../api/services.ts";
 import { NotificationGateway } from "../../packages/notifications/resend.ts";
 
 const ctx = createAppContext();
@@ -183,7 +183,11 @@ async function reconcileInvoiceWebhook(row: Record<string, any>, event: any) {
   }
 
   if (authoritativeStatus === "PAID") {
-    const revenueEventId = await ctx.supabase.rpc<string>("royaltyos_record_invoice_revenue", {
+    // Revenue is recorded here; settlement is a deliberate human action.
+    // Auto-calculation used to freeze stale recoupment state into proposals
+    // before anyone reviewed them, so it was removed: the revenue.recorded
+    // outbox event below notifies approvers instead.
+    await ctx.supabase.rpc<string>("royaltyos_record_invoice_revenue", {
       p_invoice_id: local.id,
       p_paypal_invoice_id: paypalInvoiceId,
       p_amount_minor: amount.amountMinor,
@@ -191,8 +195,6 @@ async function reconcileInvoiceWebhook(row: Record<string, any>, event: any) {
       p_received_at: new Date().toISOString(),
       p_revenue_category: null,
     });
-    try { await calculateAndCommitSettlement(ctx, { revenueEventId, actorId: null }); }
-    catch (error) { console.error("Automatic settlement after PayPal revenue failed", error); }
   }
 
   if (["REFUNDED","PARTIALLY_REFUNDED","CANCELLED","CANCELED"].includes(authoritativeStatus)) {
@@ -271,7 +273,15 @@ async function processWebhook(paypalEventId: string) {
 
 async function processEvent(event: Record<string, any>) {
   if (event.topic === "paypal.webhook") return await processWebhook(String(event.payload?.paypalEventId ?? event.aggregate_id));
-  if (event.topic === "revenue.recorded") return await calculateAndCommitSettlement(ctx, { revenueEventId: String(event.payload?.revenueEventId ?? event.aggregate_id), actorId: null });
+  if (event.topic === "revenue.recorded") {
+    const revenue = (await ctx.supabase.select<Record<string, any>>("revenue_events", {
+      select: "workspace_id,id", id: `eq.${String(event.payload?.revenueEventId ?? event.aggregate_id)}`, limit: "1",
+    }))[0];
+    if (revenue) {
+      await notifyWorkspaceRoles(String(revenue.workspace_id), ["OWNER", "FINANCE_APPROVER"], "REVENUE_AWAITING_SETTLEMENT", "RoyaltyOS revenue awaiting settlement", `Revenue event ${revenue.id} was recorded. Open Settlements and calculate when ready.`, String(revenue.id));
+    }
+    return;
+  }
   if (event.topic === "settlement.calculated") {
     const settlement = (await ctx.supabase.select<Record<string, any>>("settlements", { select: "workspace_id,id", id: `eq.${String(event.aggregate_id)}`, limit: "1" }))[0];
     if (settlement) await notifyWorkspaceRoles(String(settlement.workspace_id), ["OWNER","FINANCE_APPROVER"], "SETTLEMENT_APPROVAL_REQUIRED", "RoyaltyOS settlement awaiting approval", `Settlement ${settlement.id} was calculated deterministically and is awaiting finance approval.`, String(settlement.id));
