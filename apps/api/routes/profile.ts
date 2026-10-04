@@ -8,22 +8,27 @@ import { encryptSecret } from "../../../packages/security/paypal-vault.ts";
 export interface SafePayPalAccount {
   connected: boolean;
   environment: "sandbox" | "live" | null;
-  clientId: string | null;
-  webhookId: string | null;
+  clientIdMasked: string | null;
+  webhookConfigured: boolean;
   secretConfigured: boolean;
   updatedAt: string | null;
 }
 
-/** Strips everything sensitive: the encrypted secret must never serialize. */
+/**
+ * Strips everything sensitive on the server: the secret never serializes,
+ * and identifiers leave only a last-4 receipt (compiled here, never in the
+ * browser, so a frontend bug cannot leak the full values).
+ */
 export function toSafeAccount(row: Record<string, any> | undefined): SafePayPalAccount {
   if (!row) {
-    return { connected: false, environment: null, clientId: null, webhookId: null, secretConfigured: false, updatedAt: null };
+    return { connected: false, environment: null, clientIdMasked: null, webhookConfigured: false, secretConfigured: false, updatedAt: null };
   }
+  const clientId = String(row.paypal_client_id ?? "");
   return {
     connected: true,
     environment: row.environment === "live" ? "live" : "sandbox",
-    clientId: String(row.paypal_client_id),
-    webhookId: row.paypal_webhook_id ? String(row.paypal_webhook_id) : null,
+    clientIdMasked: clientId ? `••••${clientId.slice(-4)}` : null,
+    webhookConfigured: Boolean(row.paypal_webhook_id),
     secretConfigured: Boolean(row.paypal_client_secret_enc),
     updatedAt: row.updated_at ? String(row.updated_at) : null,
   };

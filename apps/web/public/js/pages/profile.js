@@ -40,7 +40,7 @@ export async function profile() {
       if (!host) break;
       host.insertAdjacentHTML("beforeend",
         `<div class="card" style="margin:10px 0"><div class="kicker">${esc(w.name)}</div>` +
-        `<div class="notice ${account.connected ? "success" : ""}">${account.connected ? `Connected (${esc(account.environment || "")}) · client ${esc(account.clientId || "")} · updated ${esc(account.updatedAt || "unknown")}` : "Not connected — server defaults apply."}</div>` +
+        `<div class="notice ${account.connected ? "success" : ""}">${account.connected ? `Connected (${esc(account.environment || "")}) · client ${esc(account.clientIdMasked || "••••")} · webhook ${account.webhookConfigured ? "set" : "not set"} · updated ${esc(account.updatedAt || "unknown")}` : "Not connected — server defaults apply."}</div>` +
         `<form data-paypal-form="${esc(w.id)}" class="stack" style="margin-top:10px">` +
         `<input class="input" name="clientId" maxlength="200" placeholder="PayPal client ID" autocomplete="off">` +
         `<input class="input" name="clientSecret" type="password" maxlength="2000" placeholder="PayPal client secret (never shown again)" autocomplete="off">` +

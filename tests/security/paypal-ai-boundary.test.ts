@@ -11,16 +11,21 @@ test("PayPal AI layer refuses money-moving natural language before any model/too
  assert.equal(calls,0);
 });
 
-test("PayPal AI uses sandbox Remote MCP and only configured read-only tools",async()=>{
+test("PayPal AI answers from server-side reads, never MCP tool calls",async()=>{
  let captured:any=null;
- const fetchImpl=async(_url:any,init:any)=>{captured=JSON.parse(init.body);return new Response(JSON.stringify({id:"resp_test",output_text:"2 invoices"}),{status:200,headers:{"Content-Type":"application/json"}})};
- const fakeGateway={getAccessToken:async()=>"paypal-token"};
+ const fetchImpl=async(_url:any,init:any)=>{captured=JSON.parse(init.body);return new Response(JSON.stringify({id:"resp_test",output_text:"2 paid invoices"}),{status:200,headers:{"Content-Type":"application/json"}})};
+ const fakeGateway={listInvoices:async()=>({items:[{id:"INV-1",status:"PAID"},{id:"INV-2",status:"SENT"}],total_count:2})};
  const config=testConfig();
  const result=await runPayPalReadOnlyAssistant(config,fakeGateway as any,"List my invoices",fetchImpl as any);
- assert.equal(result.text,"2 invoices");
- assert.equal(captured.tools[0].server_url,"https://mcp.sandbox.paypal.com/http");
- assert.deepEqual(captured.tools[0].allowed_tools,["list_invoices","get_invoice","list_transactions"]);
- assert.equal(captured.tools[0].authorization,"paypal-token");
- assert.equal(captured.tools[0].headers,undefined);
- assert.equal(captured.tools[0].require_approval,"never");
+ assert.equal(result.text,"2 paid invoices");
+ assert.equal(result.invoiceCount,2);
+ assert.deepEqual(result.tools,["server:list_invoices"]);
+ assert.equal(captured.tools,undefined,"no MCP tool block is sent to any gateway");
+ assert.match(JSON.stringify(captured.input),/INV-1/,"live PayPal data reaches the model as context");
+});
+
+test("PayPal AI fails loud on empty answers instead of showing a blank box",async()=>{
+ const fetchImpl=async()=>new Response(JSON.stringify({id:"resp_empty",output_text:"  "}),{status:200,headers:{"Content-Type":"application/json"}});
+ const fakeGateway={listInvoices:async()=>({items:[],total_count:0})};
+ await assert.rejects(()=>runPayPalReadOnlyAssistant(testConfig(),fakeGateway as any,"List my invoices",fetchImpl as any),/empty answer/);
 });

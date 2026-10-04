@@ -139,6 +139,11 @@ export class PayPalGateway {
     return await this.json(`/v2/invoicing/invoices/${encodeURIComponent(invoiceId)}`);
   }
 
+  async listInvoices(pageSize = 10) {
+    const size = Math.min(20, Math.max(1, pageSize));
+    return await this.json(`/v2/invoicing/invoices?page=1&page_size=${size}&total_required=true`);
+  }
+
   async createPayout(requestId: string, batchId: string, items: PayoutItemRequest[]) {
     return await this.json("/v1/payments/payouts", {
       method: "POST",
