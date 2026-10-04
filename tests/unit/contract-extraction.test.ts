@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractContractWithOpenAI, extractionToCandidates, inferBeneficiaryKey, normalizeBeneficiaryKey } from "../../packages/ai/openai-contract.ts";
+import { extractAdvanceMinor, extractContractWithOpenAI, extractionToCandidates, inferBeneficiaryKey, normalizeBeneficiaryKey } from "../../packages/ai/openai-contract.ts";
+
+test("advance figures resolve to minor units, ambiguous text abstains", () => {
+  assert.equal(extractAdvanceMinor("The Producer Advance is USD 2,000. It recoups first."), 200000);
+  assert.equal(extractAdvanceMinor("Advance: $2,000.00 payable on signing."), 200000);
+  assert.equal(extractAdvanceMinor("No advance is paid under this memo."), null);
+  assert.equal(extractAdvanceMinor("Advance USD 2,000, later increased to USD 3,000."), null);
+});
 import { minimalPdf, minimalPdfPages, testConfig } from "../helpers.ts";
 
 const emptyExtraction = { parties: [], rules: [], warnings: [], conflicts: [] };
@@ -28,6 +35,38 @@ test("fenced or truncated replies parse without a retry", async () => {
   );
   assert.equal(calls.length, 1);
   assert.deepEqual(out.extraction.warnings, ["no financial terms in this memo"]);
+});
+
+test("a 10x advance misread triggers repair with the stated figure", async () => {
+  const doc = "Producer Advance is USD 2,000. It recoups from revenue first. " + "Additional campaign terms apply. ".repeat(30);
+  const bad = JSON.stringify({
+    parties: [{ name: "Producer" }],
+    rules: [{
+      type: "RECOUPMENT", beneficiary_key: "producer", source_version: 1, source_document: "v1.pdf",
+      base: "NET_REVENUE", rate_basis_points: null, fixed_minor: null, priority: 10,
+      conditions: [], config: { currency: "USD", advanceMinor: 2000000, preRecoupmentBasisPoints: 2500, postRecoupmentBasisPoints: 2000 },
+      dependencies: [], page: 1, clause: "3.1", source_text: "Producer Advance is USD 2,000.", confidence: 0.9, needs_human_review: false,
+    }],
+    warnings: [], conflicts: [],
+  });
+  const good = JSON.stringify({
+    parties: [{ name: "Producer" }],
+    rules: [{
+      type: "RECOUPMENT", beneficiary_key: "producer", source_version: 1, source_document: "v1.pdf",
+      base: "NET_REVENUE", rate_basis_points: null, fixed_minor: null, priority: 10,
+      conditions: [], config: { currency: "USD", advanceMinor: 200000, preRecoupmentBasisPoints: 2500, postRecoupmentBasisPoints: 2000 },
+      dependencies: [], page: 1, clause: "3.1", source_text: "Producer Advance is USD 2,000.", confidence: 0.9, needs_human_review: false,
+    }],
+    warnings: [], conflicts: [],
+  });
+  const { calls, fetch } = textFetchImpl([bad, good]);
+  const out = await extractContractWithOpenAI(
+    testConfig(), { filename: "v1.pdf", bytes: minimalPdfPages([doc]), documentVersion: 1 }, fetch,
+  );
+  assert.equal(calls.length, 2, "wrong advance triggers exactly one repair");
+  assert.match(calls[1].instructions, /200000/);
+  const recoup = out.extraction.rules.find((r: any) => r.type === "RECOUPMENT");
+  assert.equal(recoup!.config.advanceMinor, 200000);
 });
 
 test("an unexplained empty reply triggers exactly one repair retry", async () => {

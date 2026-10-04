@@ -4,6 +4,26 @@ import type { CandidateRule, RuleCondition, RuleType } from "../core/types.ts";
 import { documentTextBlock, extractPdfPageTexts } from "./pdf-text.ts";
 import { assertVisionSemantics, parseVisionJson } from "./vision-contract.ts";
 
+/**
+ * Deterministic advance cross-check: finds the single explicit advance figure
+ * in the contract text (e.g. "Advance is USD 2,000" → 200000 minor) so a model
+ * that appends or drops zeros (observed: 2000000 and 2000 for USD 2,000) is
+ * corrected through the repair loop instead of sailing into review. Returns
+ * null when the text states zero or multiple distinct figures (no opinion).
+ */
+export function extractAdvanceMinor(documentText: string): number | null {
+  const sentences = documentText.split(/(?<=[.!?\n])\s+/);
+  const found = new Set<number>();
+  for (const sentence of sentences) {
+    if (!/advance/i.test(sentence)) continue;
+    for (const match of sentence.matchAll(/(?:\$\s*([\d,]+(?:\.\d{1,2})?)|USD\s*([\d,]+(?:\.\d{1,2})?)|([\d,]+(?:\.\d{1,2})?)\s*USD)/gi)) {
+      const dollars = Number(((match[1] ?? match[2] ?? match[3] ?? "").replace(/,/g, "")));
+      if (Number.isFinite(dollars) && dollars > 0) found.add(Math.round(dollars * 100));
+    }
+  }
+  return found.size === 1 ? [...found][0]! : null;
+}
+
 // Upper bound on contract characters sent per extraction call. The demo
 // agreements are ~1 KB; this cap only bites on hundred-page filings.
 const MAX_EXTRACTION_CHARS = 120_000;
@@ -225,6 +245,7 @@ export async function extractContractWithOpenAI(
       },
     }),
   });
+  const statedAdvance = extractAdvanceMinor(currentBlock);
   const finishCall = async (response: Response) => {
     const body = await response.json();
     if (!response.ok) throw new Error(`OpenAI contract extraction failed (${response.status}): ${JSON.stringify(body)}`);
@@ -233,7 +254,7 @@ export async function extractContractWithOpenAI(
     // Tolerant parse plus the semantic gate: truncated, fenced, or
     // content-free replies trigger one repair retry instead of silent garbage.
     const parsed = parseVisionJson(text);
-    assertVisionSemantics(parsed, currentChars);
+    assertVisionSemantics(parsed, currentChars, statedAdvance ?? undefined);
     const extraction = { ...parsed, warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [] } as ContractExtraction;
     for (const warning of serverWarnings) extraction.warnings.push(warning);
     return { extraction, model: config.ai.model, rawResponseId: typeof body.id === "string" ? body.id : null };

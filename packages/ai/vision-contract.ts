@@ -34,7 +34,17 @@ const KNOWN_VISION_TYPES = new Set([
  * schema-valid but content-free replies trigger the repair retry instead of
  * landing six manual Rejects in the review queue.
  */
-export function assertVisionSemantics(parsed: Record<string, any>, sourceChars?: number): void {
+export function assertVisionSemantics(parsed: Record<string, any>, sourceChars?: number, expectedAdvanceMinor?: number): void {
+  if (Number.isInteger(expectedAdvanceMinor)) {
+    const wrong = (parsed.rules as any[]).filter(
+      (rule) => rule?.type === "RECOUPMENT" && Number.isInteger(rule?.config?.advanceMinor) && rule.config.advanceMinor !== expectedAdvanceMinor,
+    );
+    if (wrong.length) {
+      throw new Error(
+        `document states a USD advance of ${expectedAdvanceMinor} minor units but ${wrong.length} RECOUPMENT rule(s) carry a different advanceMinor; correct advanceMinor to ${expectedAdvanceMinor}`,
+      );
+    }
+  }
   const warnings = Array.isArray(parsed.warnings) ? parsed.warnings : [];
   if (Array.isArray(parsed.rules) && parsed.rules.length === 0 && (sourceChars ?? 0) > 500 && !warnings.length) {
     throw new Error(
