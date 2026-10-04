@@ -5,6 +5,7 @@
 ### Added
 
 - Mobile-responsive shell: collapsible drawer navigation with scrim, single-column grids, 16px inputs (no iOS zoom), tuned type scale; profile layout gaps fixed.
+- Deterministic advance cross-check: text extraction verifies RECOUPMENT advanceMinor against the single stated advance figure (repair loop fixes 10x/100x model errors); self-gating recoupment_remaining conditions rejected; review cards show advance/pre/post/conditions; simulator refetches the active RuleSet on every submit.
 - OpenAI fallback keys (`OPENAI_API_KEY_FALLBACK_1/2`, same provider): 401/429 rotates immediately across extraction, vision, assistant and ops scripts; exhaustion fails loud with the key count.
 
 - Profile page plus per-workspace PayPal connections: owners paste their own REST app credentials (AES-256-GCM encrypted, fail-fast validation, step-up enforced), money paths resolve per workspace with global fallback, secrets never serialize. Migration 011.
