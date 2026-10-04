@@ -220,3 +220,38 @@ test("a second revenue event produces an independent settlement", async () => {
   );
   assert.equal(Number(check!.sum), Number(check!.distributable));
 });
+
+test("an all-recoupment settlement with zero payable lines commits and balances", async () => {
+  // Small first revenue fully absorbed by the advance: RECOUPMENT takes it
+  // all, every other line is $0. Ledger postings skip zero amounts (the
+  // ledger check constraint rejects 0/0 entries) while settlement lines keep
+  // the full calculation trail.
+  const fixture = await createWorkspace("all-recoupment");
+  const { contractVersionId } = await createContract(fixture);
+  const ruleset = await activateRuleset(fixture, contractVersionId);
+  const revenueEventId = await createRevenueEvent(fixture, { amountMinor: 10_000, externalId: "INV-ALL-RECOUP" });
+  const settlementId = await commitSettlement(fixture, {
+    revenueEventId,
+    rulesetId: ruleset.rulesetId,
+    rulesetHash: ruleset.rulesetHash,
+    lines: [
+      { key: "producer:RECOUPMENT", beneficiaryKey: "producer", beneficiaryName: "Producer", amountMinor: 10_000, payableMinor: 0, kind: "RECOUPMENT" },
+      { key: "artist:PAYABLE", beneficiaryKey: "artist", beneficiaryName: "Artist", amountMinor: 0, payableMinor: 0, kind: "PAYABLE" },
+      { key: "reserve:RESERVE", beneficiaryKey: "reserve", beneficiaryName: "Reserve", amountMinor: 0, payableMinor: 0, kind: "RESERVE" },
+    ],
+  });
+  const lines = await one<{ count: string }>(`select count(*) from settlement_lines where settlement_id=$1`, [settlementId]);
+  assert.equal(Number(lines!.count), 3, "all calculation lines are stored");
+  const entries = await one<{ count: string }>(
+    `select count(*) from ledger_entries where transaction_id=(select id from ledger_transactions where settlement_id=$1)`,
+    [settlementId],
+  );
+  assert.equal(Number(entries!.count), 2, "only the non-zero line posts a debit/credit pair");
+  const balance = await one<{ debit: string; credit: string }>(
+    `select sum(debit_minor)::text as debit, sum(credit_minor)::text as credit from ledger_entries
+     where transaction_id=(select id from ledger_transactions where settlement_id=$1)`,
+    [settlementId],
+  );
+  assert.equal(Number(balance!.debit), Number(balance!.credit), "ledger balances");
+  assert.equal(Number(balance!.debit), 10_000);
+});

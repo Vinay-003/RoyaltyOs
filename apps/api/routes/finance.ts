@@ -202,6 +202,8 @@ export async function handleFinanceRoutes(
     const auth = await authorizeByResource(ctx, req, "settlements", match.id!, FINANCE_ROLES, true);
     const settlement = (await ctx.supabase.select<Record<string, any>>("settlements", { select: "*", id: `eq.${match.id}`, limit: "1" }))[0];
     if (!settlement) throw statusError(404, "Settlement not found");
+    const payableLines = await ctx.supabase.select<Record<string, any>>("settlement_lines", { select: "id", settlement_id: `eq.${match.id}`, payable_minor: "gt.0", limit: "1" });
+    if (!payableLines.length) throw statusError(409, "Settlement has no payable lines: fully absorbed by recoupment or reserve, nothing to send");
     const existingBatches = await ctx.supabase.select<Record<string, any>>("payout_batches", { select: "*", settlement_id: `eq.${match.id}`, order: "payout_version.desc", limit: "1" });
     const latest = existingBatches[0];
     const version = latest ? Number(latest.payout_version) : 1;

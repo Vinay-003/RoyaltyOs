@@ -6,6 +6,7 @@
 
 - Duplicate PAID signals crashed instead of returning the existing event: the revenue upsert's `DO UPDATE` tripped the append-only guard. Migration 008 returns early with zero side effects, making webhook redelivery and refresh safe to repeat.
 - Lost webhooks no longer strand invoices: `POST /api/v1/invoices/:id/refresh` replays the worker's reconcile decision against authoritative PayPal state (records revenue and auto-settles on PAID), with a Refresh button on sent invoices.
+- Fully non-cash settlements (e.g. first revenue fully absorbed by recoupment) failed to commit: zero-amount lines posted 0/0 ledger entries violating the ledger check. Migration 009 skips ledger postings for zero-amount lines while storing the full calculation trail; executing a $0-payable settlement is refused with a clear message instead of a PayPal error.
 
 - AI extraction saved zero rules while reporting success: some gateways accept the `input_file` part, bill its tokens, then silently drop it. PDFs are now parsed server-side (pdf.js per-page text) and sent as `input_text`, which every gateway forwards. `OPENAI_SEND_PDF_FILE=true` additionally attaches the native file for providers proven to forward it (api.openai.com).
 - Image-only PDFs fail fast with a scan/OCR message instead of burning tokens; textless priors are skipped with a warning.
