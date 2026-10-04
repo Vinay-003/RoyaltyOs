@@ -2,6 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { assertVisionSemantics, extractContractWithVision, parseVisionJson } from "../../packages/ai/vision-contract.ts";
 
+test("a self-gating recoupment rule fails the semantic gate", () => {
+  assert.throws(
+    () => assertVisionSemantics({ rules: [{
+      type: "RECOUPMENT", beneficiary_key: "producer", rate_basis_points: null,
+      config: { advanceMinor: 200000 }, conditions: [{ field: "recoupment_remaining", operator: "GT", value: 0 }],
+      evidence: { source_text: "Producer advance USD 2,000." },
+    }] }),
+    /recoupment_remaining condition/,
+  );
+});
+
 test("content-free rules fail the semantic gate", () => {
   assert.throws(
     () => assertVisionSemantics({ rules: [{ type: "PERCENTAGE", beneficiary_key: "artist", evidence: {} }] }),

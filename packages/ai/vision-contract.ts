@@ -20,6 +20,7 @@ const SYSTEM_INSTRUCTIONS = [
   "Use integer basis points for percentages and integer minor units for money when amounts are explicit.",
   "beneficiary_key is REQUIRED for every rule that pays someone and must be the snake_case payee name; use reserve for remainder rules and null only for rules with no payee.",
   "A rate that applies to one revenue category MUST use type REVENUE_CATEGORY with config.category set. Never emit EXCLUSION without an explicit amountMinor.",
+  "Money math: advanceMinor and fixedMinor are INTEGER minor units, dollars × 100 exactly (USD 2,000 → 200000). Never put a recoupment_remaining condition on a RECOUPMENT rule; the engine already selects pre/post rates from the remaining balance.",
   "Respond with ONLY the JSON object matching the requested schema: no markdown fences, no tables, no prose.",
 ].join(" ");
 
@@ -65,6 +66,16 @@ export function assertVisionSemantics(parsed: Record<string, any>, sourceChars?:
     }
   });
   if (problems.length) throw new Error(`reply has content-free rules: ${problems.slice(0, 6).join("; ")}`);
+  const selfGated = (parsed.rules as any[]).filter(
+    (rule) => rule?.type === "RECOUPMENT"
+      && Array.isArray(rule?.conditions)
+      && rule.conditions.some((c: any) => c?.field === "recoupment_remaining"),
+  );
+  if (selfGated.length) {
+    throw new Error(
+      `${selfGated.length} RECOUPMENT rule(s) carry their own recoupment_remaining condition, which deletes the payee share once the advance hits zero; drop the condition, the engine selects pre/post rates itself`,
+    );
+  }
 }
 
 /** Parses model output that may arrive wrapped in fences or prose. Throws on failure. */
