@@ -7,6 +7,13 @@
 3. Add team members and assign OWNER, CONTRACT_MANAGER, FINANCE_APPROVER, CONTRIBUTOR or AUDITOR.
 4. Add beneficiaries and PayPal payout emails.
 
+## Profile and workspace PayPal
+
+1. Open Profile from the sidebar: identity, per-workspace roles, and PayPal connection status.
+2. Rename yourself via the display-name form (no step-up needed).
+3. As OWNER, connect the workspace's own PayPal REST app (client ID, secret, webhook ID, environment). Bad credentials are rejected before anything is stored.
+4. All invoice/payout/webhook paths for the workspace use the connected app; disconnecting resumes the server defaults. The secret is encrypted at rest and never returned by any endpoint.
+
 ## Contract Manager flow
 
 1. Create a contract.

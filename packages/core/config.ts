@@ -83,7 +83,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         .split(",")
         .map((origin) => origin.trim().replace(/\/$/, ""))
         .filter(Boolean),
-      paypalCredentialsKey: env.PAYPAL_CREDENTIALS_KEY ?? null,
+      paypalCredentialsKey: typeof env.PAYPAL_CREDENTIALS_KEY === "string" && env.PAYPAL_CREDENTIALS_KEY.trim()
+        ? env.PAYPAL_CREDENTIALS_KEY.trim()
+        : null,
     },
     notifications: {
       provider: (env.NOTIFICATION_PROVIDER ?? "disabled") as "disabled" | "resend",

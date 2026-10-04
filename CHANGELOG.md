@@ -4,6 +4,8 @@
 
 ### Added
 
+- Profile page plus per-workspace PayPal connections: owners paste their own REST app credentials (AES-256-GCM encrypted, fail-fast validation, step-up enforced), money paths resolve per workspace with global fallback, secrets never serialize. Migration 011.
+
 - Automatic database migrations: the API and worker apply pending `supabase/migrations/*.sql` on boot when `DATABASE_URL` is set (advisory-locked, tracked, fail-closed), plus `npm run db:migrate` for manual runs. `DATABASE_URL` added to both Render blueprints. Never paste migration files into the SQL editor again.
 
 ### Fixed

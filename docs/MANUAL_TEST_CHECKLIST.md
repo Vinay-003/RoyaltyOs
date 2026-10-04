@@ -12,11 +12,14 @@ Use Sandbox/dev accounts only. Record IDs and screenshots in a release evidence 
 
 ## B. Supabase
 
-- [ ] All migrations 001-007 applied cleanly to a fresh project/database.
+- [ ] All migrations 001-011 applied cleanly to a fresh project/database.
 - [ ] `app_versions` includes `1.0.2` (with the `1.0.0`/`1.0.1` records retained).
 - [ ] Contract Storage bucket is private.
 - [ ] RLS enabled as defined by migrations.
 - [ ] Owner registration/bootstrap works.
+- [ ] Profile page shows identity, roles, and per-workspace PayPal status; display-name change persists.
+- [ ] Connecting a workspace PayPal app with a bad secret fails fast before storing; non-OWNER gets 403; step-up enforced on connect/disconnect; secret never appears in any GET response.
+- [ ] Disconnecting resumes global server credentials with no behavior change.
 - [ ] Cross-workspace object IDs are rejected.
 - [ ] Session revocation and password step-up work.
 - [ ] Financial-integrity RPC returns zero mismatches on clean demo state.
