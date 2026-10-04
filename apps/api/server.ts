@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { createAppContext, type AppContext } from "./context.ts";
 import { handleApi } from "./router.ts";
 import { json, text } from "./http.ts";
+import { ensureDatabaseMigrations } from "../../packages/db/migrate.ts";
 
 const sourcePublicDir = path.resolve("apps/web/public");
 const compiledPublicDir = path.resolve("dist/apps/web/public");
@@ -81,4 +82,16 @@ export function startRoyaltyServer(ctx: AppContext = createAppContext()) {
 
 const entry = process.argv[1] ? path.resolve(process.argv[1]) : "";
 const self = fileURLToPath(import.meta.url);
-if (entry && path.resolve(self) === entry) startRoyaltyServer();
+if (entry && path.resolve(self) === entry) {
+  try {
+    await ensureDatabaseMigrations({
+      databaseUrl: process.env.DATABASE_URL,
+      migrationsDir: path.resolve("supabase/migrations"),
+      log: (message) => console.log(message),
+    });
+  } catch (error) {
+    console.error(JSON.stringify({ level: "error", message: "Boot migrations failed; refusing to serve", error: error instanceof Error ? error.message : String(error) }));
+    process.exit(1);
+  }
+  startRoyaltyServer();
+}

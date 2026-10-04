@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Automatic database migrations: the API and worker apply pending `supabase/migrations/*.sql` on boot when `DATABASE_URL` is set (advisory-locked, tracked, fail-closed), plus `npm run db:migrate` for manual runs. `DATABASE_URL` added to both Render blueprints. Never paste migration files into the SQL editor again.
+
 ### Fixed
 
 - Duplicate PAID signals crashed instead of returning the existing event: the revenue upsert's `DO UPDATE` tripped the append-only guard. Migration 008 returns early with zero side effects, making webhook redelivery and refresh safe to repeat.

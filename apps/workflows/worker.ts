@@ -1,8 +1,21 @@
+import path from "node:path";
 import { createAppContext } from "../api/context.ts";
 import { parsePayPalInvoiceAmount } from "../api/services.ts";
 import { NotificationGateway } from "../../packages/notifications/resend.ts";
+import { ensureDatabaseMigrations } from "../../packages/db/migrate.ts";
 
 const ctx = createAppContext();
+
+try {
+  await ensureDatabaseMigrations({
+    databaseUrl: process.env.DATABASE_URL,
+    migrationsDir: path.resolve("supabase/migrations"),
+    log: (message) => console.log(message),
+  });
+} catch (error) {
+  console.error(JSON.stringify({ level: "error", message: "Boot migrations failed; worker refusing to start", error: error instanceof Error ? error.message : String(error) }));
+  process.exit(1);
+}
 const notifications = new NotificationGateway(ctx.config, ctx.fetchImpl);
 let stopped = false;
 process.on("SIGTERM", () => { stopped = true; });

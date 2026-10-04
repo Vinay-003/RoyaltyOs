@@ -28,6 +28,7 @@
     "smoke:external": "node scripts/external-smoke.mjs",
     "test:external": "node scripts/external-provider-check.mjs",
     "db:push": "supabase db push",
+    "db:migrate": "node --experimental-strip-types scripts/db-migrate.ts",
     "db:reset:local": "supabase db reset",
     "env:check": "node scripts/env-check.mjs",
     "release:report": "node scripts/release-report.mjs",
@@ -36,11 +37,11 @@
   },
   "devDependencies": {
     "@types/pg": "^8.23.1",
-    "pg": "^8.23.1",
     "typescript": "5.8.3"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.10",
-    "pdfjs-dist": "^6.3.289"
+    "pdfjs-dist": "^6.3.289",
+    "pg": "^8.23.1"
   }
 }

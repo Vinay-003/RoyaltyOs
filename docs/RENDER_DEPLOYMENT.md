@@ -1,5 +1,16 @@
 # Render Deployment
 
+## Database migrations (automatic)
+
+Set `DATABASE_URL` (Supabase dashboard → Project Settings → Database → connection
+string, `postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres`)
+as a Render env var. On every boot the API and worker each run pending
+`supabase/migrations/*.sql` files in order under an advisory lock, tracked in
+`royaltyos_schema_migrations`; already-applied files are skipped. A failed
+migration refuses to boot with the filename in the logs. No manual SQL Editor
+runs are needed after this is set (existing dashboard-migrated databases simply
+re-run their idempotent files once, then record them).
+
 `render.yaml` is the **free-tier** blueprint: one Node web service in the Singapore
 region running the API plus the outbox worker in one process group
 (`npm run start:free`, see `scripts/start-free.mjs`). The paid three-service
