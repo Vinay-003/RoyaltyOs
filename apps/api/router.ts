@@ -24,6 +24,7 @@ import { handleAssistantRoutes } from "./routes/assistant.ts";
 import { handleAuthRoutes } from "./routes/auth.ts";
 import { handleContractRoutes } from "./routes/contracts.ts";
 import { handleFinanceRoutes } from "./routes/finance.ts";
+import { handleProfileRoutes } from "./routes/profile.ts";
 import { handleProjectRoutes } from "./routes/projects.ts";
 import { handleSystemRoutes } from "./routes/system.ts";
 
@@ -59,6 +60,7 @@ export async function handleApi(
 
   if (await handleSystemRoutes(ctx, req, res, url)) return;
   if (await handleAuthRoutes(ctx, req, res, url, requestId)) return;
+  if (await handleProfileRoutes(ctx, req, res, url, requestId)) return;
   if (await handleProjectRoutes(ctx, req, res, url, requestId)) return;
   if (await handleContractRoutes(ctx, req, res, url, requestId)) return;
   if (await handleFinanceRoutes(ctx, req, res, url, requestId)) return;

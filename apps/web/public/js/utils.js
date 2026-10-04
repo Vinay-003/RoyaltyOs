@@ -22,7 +22,7 @@ export function needProject(){if(!state.workspaceId||!state.projectId)throw new 
 
 export function hero(kicker,title,desc){return `<section class="hero"><div class="kicker">${esc(kicker)}</div><h2>${esc(title)}</h2><p>${esc(desc)}</p></section>`}
 
-const routeTitles={"/":"Overview","/insights":"Insights","/contracts":"Contracts","/rule-graph":"Rule graph","/simulator":"Simulator","/invoices":"Invoices","/settlements":"Settlements","/payouts":"Payouts","/royalties":"Royalties","/recipients":"Recipients","/team":"Team","/notifications":"Notifications","/paypal-ai":"PayPal AI","/audit":"Audit"};
+const routeTitles={"/":"Overview","/insights":"Insights","/contracts":"Contracts","/rule-graph":"Rule graph","/simulator":"Simulator","/invoices":"Invoices","/settlements":"Settlements","/payouts":"Payouts","/royalties":"Royalties","/recipients":"Recipients","/team":"Team","/notifications":"Notifications","/paypal-ai":"PayPal AI","/audit":"Audit","/profile":"Profile"};
 
 export function loadingView(p){const t=routeTitles[p]||"RoyaltyOS";return `${hero("LOADING",t,"Fetching fresh data from the API...")}<section class="card"><div class="skel" style="height:20px;width:38%;margin-bottom:12px"></div><div class="skel" style="height:96px;margin-bottom:10px"></div><div class="skel" style="height:96px"></div></section>`}
 

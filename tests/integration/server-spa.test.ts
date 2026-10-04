@@ -26,6 +26,10 @@ test("SPA fallback opens /insights instead of returning a dead route", async () 
     assert.match(routerJs, /if\(p==="\/insights"\)return await insights\(\)/);
     assert.match(routerJs, /if\(p==="\/team"\)return await team\(\)/);
     assert.match(routerJs, /if\(p==="\/notifications"\)return await notificationsView\(\)/);
+    assert.match(routerJs, /if\(p==="\/profile"\)return await profile\(\)/);
+    const profilePage = await fetch(base + "/js/pages/profile.js");
+    assert.equal(profilePage.status, 200, "/js/pages/profile.js");
+    assert.match(profilePage.headers.get("content-type") ?? "", /javascript/);
     for (const module of ["/js/utils.js", "/js/state.js", "/js/api.js", "/js/nav.js", "/js/pages/dashboard.js"]) {
       const response = await fetch(base + module);
       assert.equal(response.status, 200, module);
@@ -47,7 +51,7 @@ test("all documented SPA application routes return the shell instead of a server
     const routes = [
       "/", "/insights", "/contracts", "/rule-graph", "/simulator",
       "/invoices", "/settlements", "/payouts", "/royalties", "/recipients",
-      "/team", "/notifications", "/paypal-ai", "/audit",
+      "/team", "/notifications", "/paypal-ai", "/audit", "/profile",
     ];
     for (const route of routes) {
       const response = await fetch(base + route, { headers: { Accept: "text/html" } });

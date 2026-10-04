@@ -76,6 +76,14 @@ export class SupabaseClient {
     return result.payload as T[];
   }
 
+  async delete<T>(table: string, query: Record<string, string>) {
+    const result = await this.request(`/rest/v1/${table}`, {
+      method: "DELETE",
+      query,
+    });
+    return result.payload as T[];
+  }
+
   async update<T>(table: string, patch: unknown, query: Record<string, string>, returning = true) {
     const result = await this.request(`/rest/v1/${table}`, {
       method: "PATCH",
@@ -121,6 +129,16 @@ export class SupabaseClient {
 
   async adminGetUser(userId: string) {
     const result = await this.request(`/auth/v1/admin/users/${encodeURIComponent(userId)}`, {}, true);
+    return result.payload as { id: string; email?: string; user_metadata?: Record<string, unknown> };
+  }
+
+  async adminUpdateUser(userId: string, attributes: { displayName?: string }) {
+    const body: Record<string, unknown> = {};
+    if (typeof attributes.displayName === "string") body.user_metadata = { display_name: attributes.displayName };
+    const result = await this.request(`/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
+      method: "PUT",
+      body,
+    }, true);
     return result.payload as { id: string; email?: string; user_metadata?: Record<string, unknown> };
   }
 

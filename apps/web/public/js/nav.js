@@ -4,7 +4,7 @@ import { clearSession, state } from "./state.js";
 import { $, app, busy, esc, path, toast } from "./utils.js";
 
 export const navItems=[
-  ["/","Overview","O"],["/insights","Insights","I"],["/contracts","Contracts","C"],["/rule-graph","Rule graph","G"],["/simulator","Simulator","S"],["/invoices","Invoices","$"],["/settlements","Settlements","="],["/payouts","Payouts","P"],["/royalties","Royalties","R"],["/recipients","Recipients","@"],["/team","Team","T"],["/notifications","Notifications","N"],["/paypal-ai","PayPal AI","AI"],["/audit","Audit","A"]
+  ["/","Overview","O"],["/insights","Insights","I"],["/contracts","Contracts","C"],["/rule-graph","Rule graph","G"],["/simulator","Simulator","S"],["/invoices","Invoices","$"],["/settlements","Settlements","="],["/payouts","Payouts","P"],["/royalties","Royalties","R"],["/recipients","Recipients","@"],["/team","Team","T"],["/notifications","Notifications","N"],["/paypal-ai","PayPal AI","AI"],["/audit","Audit","A"],["/profile","Profile","U"]
 ];
 
 export function shell(content,title="RoyaltyOS"){

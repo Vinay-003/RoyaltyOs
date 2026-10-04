@@ -47,6 +47,7 @@ const registry = {
   notifications: ["notificationsView"],
   "paypal-ai": ["paypalAi"],
   audit: ["audit"],
+  profile: ["profile"],
 };
 
 const CORE_MODULES = ["utils", "state", "api", "nav", "login", "router"];

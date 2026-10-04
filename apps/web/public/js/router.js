@@ -7,6 +7,7 @@ import { loadMe, loginView } from "./pages/login.js";
 import { shell } from "./nav.js";
 import { notificationsView } from "./pages/notifications.js";
 import { payouts } from "./pages/payouts.js";
+import { profile } from "./pages/profile.js";
 import { paypalAi } from "./pages/paypal-ai.js";
 import { recipients } from "./pages/recipients.js";
 import { royalties } from "./pages/royalties.js";
@@ -38,6 +39,7 @@ export async function render(){
     if(p==="/notifications")return await notificationsView();
     if(p==="/paypal-ai")return await paypalAi();
     if(p==="/audit")return await audit();
+    if(p==="/profile")return await profile();
     navTo("/");
   }catch(e){shell(`${hero("ERROR","This view could not load.",e.message)}<div class="notice error">${esc(e.stack||e.message)}</div>`,"Error")}
 }
