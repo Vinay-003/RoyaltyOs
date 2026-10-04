@@ -1,5 +1,5 @@
 import type { AppConfig } from "../core/config.ts";
-import { fetchWithRetry } from "../core/http-retry.ts";
+import { openaiFetch } from "../ai/openai-client.ts";
 import type { PayPalGateway } from "../paypal/gateway.ts";
 
 function responseText(payload: any) {
@@ -23,9 +23,9 @@ export async function runPayPalReadOnlyAssistant(
     throw new Error("PayPal AI assistant is intentionally read-only; use the explicit RoyaltyOS financial workflow for mutations");
   }
   const accessToken = await gateway.getAccessToken();
-  const response = await fetchWithRetry(fetchImpl, `${config.ai.baseUrl}/responses`, {
+  const response = await openaiFetch(config, fetchImpl, `${config.ai.baseUrl}/responses`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${config.ai.openaiApiKey}`, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: config.paypalAi.model,
       store: false,
@@ -41,7 +41,7 @@ export async function runPayPalReadOnlyAssistant(
       }],
       input: question,
     }),
-  }, { maxRetries: config.ai.maxRetries, timeoutMs: config.ai.timeoutMs, baseDelayMs: config.ai.retryBaseMs });
+  });
   const payload = await response.json();
   if (!response.ok) throw new Error(`PayPal AI MCP request failed (${response.status}): ${JSON.stringify(payload)}`);
   return { text: responseText(payload), responseId: payload?.id ?? null, model: config.paypalAi.model, tools: config.paypalAi.allowedTools };

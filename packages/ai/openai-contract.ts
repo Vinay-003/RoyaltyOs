@@ -1,5 +1,5 @@
 import type { AppConfig } from "../core/config.ts";
-import { fetchWithRetry } from "../core/http-retry.ts";
+import { openaiFetch } from "./openai-client.ts";
 import type { CandidateRule, RuleCondition, RuleType } from "../core/types.ts";
 import { documentTextBlock, extractPdfPageTexts } from "./pdf-text.ts";
 import { assertVisionSemantics, parseVisionJson } from "./vision-contract.ts";
@@ -205,10 +205,9 @@ export async function extractContractWithOpenAI(
     "For category rules, put category into config. For caps/floors/thresholds, put targetRuleId/amountMinor fields into config when inferable.",
     "For DATE_RANGE and PRIORITY modifiers, use targetRuleId only when the target is unambiguous; otherwise keep the financial rule itself review-required. Use priorityValue for an explicit contractual priority number.",
   ].join(" ");
-  const call = (repairNote?: string) => fetchWithRetry(fetchImpl, `${config.ai.baseUrl}/responses`, {
+  const call = (repairNote?: string) => openaiFetch(config, fetchImpl, `${config.ai.baseUrl}/responses`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${config.ai.openaiApiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -225,7 +224,7 @@ export async function extractContractWithOpenAI(
         },
       },
     }),
-  }, { maxRetries: config.ai.maxRetries, timeoutMs: config.ai.timeoutMs, baseDelayMs: config.ai.retryBaseMs });
+  });
   const finishCall = async (response: Response) => {
     const body = await response.json();
     if (!response.ok) throw new Error(`OpenAI contract extraction failed (${response.status}): ${JSON.stringify(body)}`);

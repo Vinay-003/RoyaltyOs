@@ -1,5 +1,5 @@
 import type { AppConfig } from "../core/config.ts";
-import { fetchWithRetry } from "../core/http-retry.ts";
+import { openaiFetch } from "./openai-client.ts";
 import { contractSchema, type ContractExtraction } from "./openai-contract.ts";
 import { renderPdfPageImages } from "./pdf-image.ts";
 
@@ -144,10 +144,9 @@ export async function extractContractWithVision(
     { role: "system", content: SYSTEM_INSTRUCTIONS },
     { role: "user", content: parts },
   ];
-  const call = (messages: unknown[]) => fetchWithRetry(fetchImpl, `${config.ai.baseUrl}/chat/completions`, {
+  const call = (messages: unknown[]) => openaiFetch(config, fetchImpl, `${config.ai.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${config.ai.openaiApiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -157,7 +156,7 @@ export async function extractContractWithVision(
       max_tokens: 4000,
       messages,
     }),
-  }, { maxRetries: config.ai.maxRetries, timeoutMs: config.ai.timeoutMs, baseDelayMs: config.ai.retryBaseMs });
+  });
 
   const first = await call(baseMessages);
   const firstBody = await first.json();

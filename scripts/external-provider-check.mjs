@@ -48,16 +48,36 @@ await run('Application /insights SPA route', async () => {
 
 const openaiBaseUrl = (env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '');
 
-if (paidAi) {
-  await run('OpenAI Responses minimal call', async () => {
-    const key = env.OPENAI_API_KEY;
-    if (!key) throw new Error('OPENAI_API_KEY missing');
-    const model = env.OPENAI_MODEL ?? 'gpt-6-astra';
-    const response = await fetch(`${openaiBaseUrl}/responses`, {
+function openaiKeys() {
+  const keys = ['OPENAI_API_KEY', 'OPENAI_API_KEY_FALLBACK_1', 'OPENAI_API_KEY_FALLBACK_2']
+    .map((name) => env[name])
+    .filter((key) => typeof key === 'string' && key && !key.startsWith('YOUR_'));
+  if (!keys.length) throw new Error('OPENAI_API_KEY missing');
+  return keys;
+}
+
+async function openaiPost(path, body) {
+  let text = '';
+  let status = 0;
+  for (const key of openaiKeys()) {
+    const response = await fetch(`${openaiBaseUrl}${path}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, store: false, input: 'Reply with exactly ROYALTYOS_OK', max_output_tokens: 300 }),
+      body: JSON.stringify(body),
     });
+    text = await response.text();
+    status = response.status;
+    if (status !== 401 && status !== 429) break;
+  }
+  if (status < 200 || status >= 300) throw new Error(`${status} ${text}`);
+  return { status, text };
+}
+
+if (paidAi) {
+  await run('OpenAI Responses minimal call', async () => {
+    const model = env.OPENAI_MODEL ?? 'gpt-6-astra';
+    const { text } = await openaiPost('/responses',
+      { model, store: false, input: 'Reply with exactly ROYALTYOS_OK', max_output_tokens: 300 });
     const text = await response.text();
     if (!response.ok) throw new Error(`${response.status} ${text}`);
     const body = JSON.parse(text);
@@ -71,10 +91,10 @@ if (paidAi) {
 
 if (mcpAi) {
   await run('OpenAI + PayPal remote MCP read-only call', async () => {
-    const key = env.OPENAI_API_KEY;
     const id = env.PAYPAL_CLIENT_ID;
     const secret = env.PAYPAL_CLIENT_SECRET;
-    if (!key || !id || !secret) throw new Error('OpenAI/PayPal credentials missing');
+    if (!id || !secret) throw new Error('PayPal credentials missing');
+    openaiKeys();
     const paypalBase = (env.PAYPAL_ENVIRONMENT ?? 'sandbox') === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
     const oauth = await fetch(`${paypalBase}/v1/oauth2/token`, {
       method: 'POST',
@@ -83,26 +103,21 @@ if (mcpAi) {
     });
     const oauthBody = await oauth.json();
     if (!oauth.ok || !oauthBody.access_token) throw new Error(`PayPal OAuth ${oauth.status}`);
-    const response = await fetch(`${openaiBaseUrl}/responses`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: env.PAYPAL_MCP_MODEL ?? env.OPENAI_MODEL ?? 'gpt-6-astra',
-        store: false,
-        instructions: 'Use only the permitted read-only PayPal tools. Do not mutate any PayPal object.',
-        tools: [{
-          type: 'mcp',
-          server_label: 'paypal-mcp',
-          server_url: env.PAYPAL_MCP_SERVER_URL ?? 'https://mcp.sandbox.paypal.com/http',
-          authorization: oauthBody.access_token,
-          require_approval: 'never',
-          allowed_tools: (env.PAYPAL_MCP_ALLOWED_TOOLS ?? 'list_invoices,get_invoice,list_transactions').split(',').map((x) => x.trim()).filter(Boolean),
-        }],
-        input: 'List at most one recent invoice and summarize its current status. If there are none, say none.',
-      }),
+    const { text } = await openaiPost('/responses', {
+      model: env.PAYPAL_MCP_MODEL ?? env.OPENAI_MODEL ?? 'gpt-6-astra',
+      store: false,
+      instructions: 'Use only the permitted read-only PayPal tools. Do not mutate any PayPal object.',
+      tools: [{
+        type: 'mcp',
+        server_label: 'paypal-mcp',
+        server_url: env.PAYPAL_MCP_SERVER_URL ?? 'https://mcp.sandbox.paypal.com/http',
+        authorization: oauthBody.access_token,
+        require_approval: 'never',
+        allowed_tools: (env.PAYPAL_MCP_ALLOWED_TOOLS ?? 'list_invoices,get_invoice,list_transactions').split(',').map((x) => x.trim()).filter(Boolean),
+      }],
+      input: 'List at most one recent invoice and summarize its current status. If there are none, say none.',
     });
-    const text = await response.text();
-    if (!response.ok) throw new Error(`${response.status} ${text}`);
+    void text;
     return 'remote MCP tool invocation accepted';
   });
 } else {

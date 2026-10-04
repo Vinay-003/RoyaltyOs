@@ -90,17 +90,32 @@ await run('PayPal Invoicing API read', async () => {
   return 'invoicing API reachable';
 });
 
+// All configured OpenAI keys (primary plus fallbacks) for key rotation.
+function openaiKeys() {
+  return ['OPENAI_API_KEY', 'OPENAI_API_KEY_FALLBACK_1', 'OPENAI_API_KEY_FALLBACK_2']
+    .map((name) => env[name])
+    .filter((key) => typeof key === 'string' && key && !key.startsWith('YOUR_'));
+}
+
 await run('OpenAI API/model access', async () => {
-  const key = required('OPENAI_API_KEY');
+  const keys = openaiKeys();
+  if (!keys.length) throw new Error('Missing OPENAI_API_KEY');
   const model = env.OPENAI_MODEL ?? 'gpt-6-astra';
   const baseUrl = (env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '');
   // Portable across OpenAI and OpenAI-compatible gateways (some gateways only
-  // implement the list endpoint, not per-model GET).
-  const response = await fetch(`${baseUrl}/models`, {
-    headers: { Authorization: `Bearer ${key}` },
-  });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`${response.status} ${text}`);
+  // implement the list endpoint, not per-model GET). A 401/429 rotates to the
+  // next configured key.
+  let text = '';
+  let status = 0;
+  for (const key of keys) {
+    const response = await fetch(`${baseUrl}/models`, {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    text = await response.text();
+    status = response.status;
+    if (status !== 401 && status !== 429) break;
+  }
+  if (status < 200 || status >= 300) throw new Error(`${status} ${text}`);
   try {
     const ids = (JSON.parse(text).data ?? []).map((entry) => entry.id).filter(Boolean);
     if (ids.length && !ids.includes(model)) throw new Error(`model ${model} not listed (${ids.length} models available)`);

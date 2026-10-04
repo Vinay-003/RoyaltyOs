@@ -51,6 +51,7 @@ Contract intelligence:
 - native PDF `input_file`
 - strict JSON-schema Structured Outputs
 - default model: `gpt-6-astra` (configurable with `OPENAI_MODEL`)
+- fallback keys: `OPENAI_API_KEY_FALLBACK_1/2` (same provider); a 401/429 rotates immediately, exhaustion fails loud
 - current + prior contract versions can be provided to expose amendment/conflict context
 
 PayPal AI:

@@ -51,6 +51,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     ai: {
       provider: env.AI_PROVIDER ?? "openai",
       openaiApiKey: required("OPENAI_API_KEY", env),
+      openaiApiKeys: [
+        required("OPENAI_API_KEY", env),
+        ...(typeof env.OPENAI_API_KEY_FALLBACK_1 === "string" && env.OPENAI_API_KEY_FALLBACK_1 ? [env.OPENAI_API_KEY_FALLBACK_1] : []),
+        ...(typeof env.OPENAI_API_KEY_FALLBACK_2 === "string" && env.OPENAI_API_KEY_FALLBACK_2 ? [env.OPENAI_API_KEY_FALLBACK_2] : []),
+      ],
       baseUrl: (env.OPENAI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/$/, ""),
       sendPdfFile: (env.OPENAI_SEND_PDF_FILE ?? "false") === "true",
       extractionMode: env.AI_EXTRACTION_MODE === "vision" ? "vision" : "text",

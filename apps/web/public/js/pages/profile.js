@@ -9,8 +9,8 @@ export async function profile() {
   const owners = me.workspaces.filter((w) => w.role === "OWNER");
   shell(
     `${hero("PROFILE", "Identity and PayPal connections.", "Your display name identifies you across the workspace. Each workspace can connect its own PayPal app; money paths use the workspace credentials when connected, otherwise the server defaults.")}` +
-      `<section class="card"><div class="card-head"><div><div class="kicker">IDENTITY</div><h3>${esc(me.displayName || me.email)}</h3></div></div></div>` +
-      `<form id="nameForm" class="row"><input class="input" name="displayName" maxlength="120" value="${esc(me.displayName || "")}" placeholder="Display name"><button class="btn" type="submit">Save name</button></form>` +
+      `<section class="card"><div class="card-head"><div><div class="kicker">IDENTITY</div><h3>${esc(me.displayName || me.email)}</h3></div></div>` +
+      `<form id="nameForm"><div class="field"><label for="displayName">Display name</label><div class="row"><input class="input" id="displayName" name="displayName" maxlength="120" value="${esc(me.displayName || "")}" placeholder="Display name" style="flex:1"><button class="btn" type="submit">Save name</button></div></div></form>` +
       `<small class="mono">${esc(me.email)}</small></section>` +
       `<section class="card" style="margin-top:12px"><div class="card-head"><div><div class="kicker">WORKSPACES</div><h3>Your roles</h3></div></div>` +
       `${me.workspaces.map((w) => `<div class="row" style="justify-content:space-between"><div><b>${esc(w.name)}</b><br><small>${esc(w.role)}${w.paypalConnected ? ` · PayPal ${esc(w.paypalEnvironment || "")} connected` : " · PayPal not connected"}</small></div></div>`).join("") || '<div class="empty">No workspaces yet.</div>'}` +
