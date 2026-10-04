@@ -15,6 +15,22 @@ export interface MigrateOptions {
   log?: (message: string) => void;
 }
 
+/**
+ * Explains database connection failures in actionable terms. The common one:
+ * Supabase's direct hostname is IPv6-only and some hosts (Render free tier)
+ * have no IPv6 egress, which surfaces as ENETUNREACH on port 5432. The fix is
+ * the IPv4-compatible pooler string from Supabase dashboard → Project
+ * Settings → Database → Connection pooling (a aws-*-pooler.supabase.com
+ * hostname), not the direct-connection string.
+ */
+export function describeConnectionError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/ENETUNREACH|EHOSTUNREACH|ENOTFOUND/i.test(message)) {
+    return `${message} — the database host is unreachable from here. If this is Supabase, the direct hostname is IPv6-only: use the IPv4 pooler connection string from Supabase dashboard → Project Settings → Database → Connection pooling instead of the direct string.`;
+  }
+  return message;
+}
+
 /** Sorted migration filenames (*.sql) in a directory. */
 export function listMigrationFiles(migrationsDir: string): string[] {
   return readdirSync(migrationsDir)
@@ -145,7 +161,7 @@ export async function migrateDatabase(
         log("[migrate] server has no SSL support (local database?); retrying plaintext");
         continue;
       }
-      throw error;
+      throw new Error(describeConnectionError(error));
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));

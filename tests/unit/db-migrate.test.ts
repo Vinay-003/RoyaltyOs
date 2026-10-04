@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runMigrations } from "../../packages/db/migrate.ts";
+import { describeConnectionError, runMigrations } from "../../packages/db/migrate.ts";
+
+test("unreachable hosts explain themselves with the pooler fix", () => {
+  const hint = describeConnectionError(new Error("connect ENETUNREACH 2406:da14::123:5432"));
+  assert.match(hint, /IPv4 pooler/);
+  assert.match(hint, /ENETUNREACH/);
+  assert.equal(describeConnectionError(new Error("password authentication failed")), "password authentication failed");
+});
 
 function fakeClient(recorded: string[] = [], failOn?: string) {
   const statements: string[] = [];
