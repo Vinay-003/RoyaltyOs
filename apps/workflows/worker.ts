@@ -1,6 +1,6 @@
 import path from "node:path";
 import { createAppContext } from "../api/context.ts";
-import { parsePayPalInvoiceAmount } from "../api/services.ts";
+import { parsePayPalInvoiceAmount, paypalForWorkspace } from "../api/services.ts";
 import { NotificationGateway } from "../../packages/notifications/resend.ts";
 import { ensureDatabaseMigrations } from "../../packages/db/migrate.ts";
 
@@ -163,11 +163,12 @@ async function recordReconciliationIssue(input: {
 async function reconcileInvoiceWebhook(row: Record<string, any>, event: any) {
   const paypalInvoiceId = String(event?.resource?.id ?? row.resource_id ?? "");
   if (!paypalInvoiceId) throw new Error("Invoice webhook has no resource id");
-  const authoritative = await ctx.paypal.getInvoice(paypalInvoiceId);
   const local = (await ctx.supabase.select<Record<string, any>>("invoices", {
     select: "*", paypal_invoice_id: `eq.${paypalInvoiceId}`, limit: "1"
   }))[0];
   if (!local) throw new Error("No local invoice mapping for PayPal invoice");
+  const { gateway: invoicePaypal } = await paypalForWorkspace(ctx, String(local.workspace_id));
+  const authoritative = await invoicePaypal.getInvoice(paypalInvoiceId);
 
   const amount = parsePayPalInvoiceAmount(authoritative);
   const amountMatches = Number(local.amount_minor) === amount.amountMinor && String(local.currency) === amount.currency;
@@ -262,7 +263,13 @@ async function processWebhook(paypalEventId: string) {
   if (type.startsWith("PAYMENT.PAYOUTSBATCH.")) {
     const paypalBatchId = event?.resource?.batch_header?.payout_batch_id ?? event?.resource?.payout_batch_id ?? row.resource_id;
     if (!paypalBatchId) throw new Error("Payout batch webhook missing batch id");
-    const batch = await ctx.paypal.getPayoutBatch(String(paypalBatchId));
+    const knownBatch = (await ctx.supabase.select<Record<string, any>>("payout_batches", {
+      select: "workspace_id", paypal_batch_id: `eq.${String(paypalBatchId)}`, limit: "1",
+    }))[0];
+    const { gateway: batchPaypal } = knownBatch
+      ? await paypalForWorkspace(ctx, String(knownBatch.workspace_id))
+      : { gateway: ctx.paypal };
+    const batch = await batchPaypal.getPayoutBatch(String(paypalBatchId));
     for (const item of batch?.items ?? []) {
       const senderItemId = item?.payout_item?.sender_item_id;
       if (!senderItemId) continue;
@@ -308,7 +315,13 @@ async function processEvent(event: Record<string, any>) {
   if (event.topic === "payout.reconcile") {
     const paypalBatchId = String(event.payload?.paypalBatchId ?? "");
     if (!paypalBatchId) throw new Error("payout.reconcile is missing paypalBatchId");
-    const batch = await ctx.paypal.getPayoutBatch(paypalBatchId);
+    const knownBatch = (await ctx.supabase.select<Record<string, any>>("payout_batches", {
+      select: "workspace_id", paypal_batch_id: `eq.${paypalBatchId}`, limit: "1",
+    }))[0];
+    const { gateway: reconcilePaypal } = knownBatch
+      ? await paypalForWorkspace(ctx, String(knownBatch.workspace_id))
+      : { gateway: ctx.paypal };
+    const batch = await reconcilePaypal.getPayoutBatch(paypalBatchId);
     for (const item of batch?.items ?? []) {
       const senderItemId = item?.payout_item?.sender_item_id;
       if (!senderItemId) continue;

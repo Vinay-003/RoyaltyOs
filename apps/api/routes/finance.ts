@@ -13,6 +13,7 @@ import {
 } from "../http.ts";
 import {
   calculateAndCommitSettlement,
+  paypalForWorkspace,
   paypalWebhookPayloadHash,
   reconcileInvoiceState,
 } from "../services.ts";
@@ -59,7 +60,8 @@ export async function handleFinanceRoutes(
       requestId: idempotencyKey, currency: String(body.currency ?? ctx.config.paypal.currency), recipientEmail, itemName, amountMinor, reference: `RoyaltyOS ${projectId}`,
     };
     if (body.note) invoiceInput.note = String(body.note).slice(0, 4000);
-    const paypal = await ctx.paypal.createInvoice(invoiceInput);
+    const { gateway: workspacePaypal } = await paypalForWorkspace(ctx, workspaceId);
+    const paypal = await workspacePaypal.createInvoice(invoiceInput);
     if (typeof paypal?.id !== "string") throw new Error("PayPal did not return an invoice id");
     const rows = await ctx.supabase.insert<Record<string, any>>("invoices", { workspace_id: workspaceId, project_id: projectId, created_by: user.id, paypal_invoice_id: paypal.id, recipient_email: recipientEmail, item_name: itemName, amount_minor: amountMinor, currency: body.currency ?? ctx.config.paypal.currency, status: paypal.status ?? "DRAFT", recipient_view_url: paypal?.detail?.metadata?.recipient_view_url ?? null, request_id: idempotencyKey });
     await ctx.supabase.rpc("royaltyos_append_audit", { p_workspace_id: workspaceId, p_actor_id: user.id, p_action: "INVOICE_CREATED", p_resource_type: "INVOICE", p_resource_id: String(rows[0]?.id), p_detail: `PayPal draft invoice ${paypal.id} created`, p_correlation_id: requestId });
@@ -73,8 +75,9 @@ export async function handleFinanceRoutes(
     const invoice = (await ctx.supabase.select<Record<string, any>>("invoices", { select: "*", id: `eq.${match.id}`, limit: "1" }))[0];
     if (!invoice) throw statusError(404, "Invoice not found");
     const sendRequestId = sha256Hex(`send|${invoice.id}`).slice(0, 36);
-    await ctx.paypal.sendInvoice(String(invoice.paypal_invoice_id), sendRequestId);
-    const authoritative = await ctx.paypal.getInvoice(String(invoice.paypal_invoice_id));
+    const { gateway: sendPaypal } = await paypalForWorkspace(ctx, auth.workspaceId);
+    await sendPaypal.sendInvoice(String(invoice.paypal_invoice_id), sendRequestId);
+    const authoritative = await sendPaypal.getInvoice(String(invoice.paypal_invoice_id));
     const rows = await ctx.supabase.update<Record<string, any>>("invoices", { status: authoritative.status ?? "SENT", recipient_view_url: authoritative?.detail?.metadata?.recipient_view_url ?? invoice.recipient_view_url, updated_at: new Date().toISOString() }, { id: `eq.${match.id}` });
     await ctx.supabase.rpc("royaltyos_append_audit", { p_workspace_id: auth.workspaceId, p_actor_id: auth.user.id, p_action: "INVOICE_SENT", p_resource_type: "INVOICE", p_resource_id: match.id, p_detail: `PayPal invoice ${invoice.paypal_invoice_id} sent`, p_correlation_id: sendRequestId });
     json(res, 200, rows[0]);
@@ -89,7 +92,8 @@ export async function handleFinanceRoutes(
     const auth = await authorizeByResource(ctx, req, "invoices", match.id!, FINANCE_ROLES);
     const invoice = (await ctx.supabase.select<Record<string, any>>("invoices", { select: "*", id: `eq.${match.id}`, limit: "1" }))[0];
     if (!invoice) throw statusError(404, "Invoice not found");
-    const authoritative = await ctx.paypal.getInvoice(String(invoice.paypal_invoice_id));
+    const { gateway: refreshPaypal } = await paypalForWorkspace(ctx, auth.workspaceId);
+    const authoritative = await refreshPaypal.getInvoice(String(invoice.paypal_invoice_id));
     const reconciled = reconcileInvoiceState(
       { amountMinor: Number(invoice.amount_minor), currency: String(invoice.currency), viewUrl: invoice.recipient_view_url ?? null },
       authoritative,
@@ -136,10 +140,13 @@ export async function handleFinanceRoutes(
       transmissionSig: requireString(header(req, "paypal-transmission-sig"), "paypal-transmission-sig", 5000),
       transmissionTime: requireString(header(req, "paypal-transmission-time"), "paypal-transmission-time", 200),
     };
-    const verified = await ctx.paypal.verifyWebhook(webhookHeaders, event);
+    const webhookWorkspaceId = await resolveWebhookWorkspace(ctx, event);
+    const { gateway: webhookPaypal } = webhookWorkspaceId
+      ? await paypalForWorkspace(ctx, webhookWorkspaceId)
+      : { gateway: ctx.paypal };
+    const verified = await webhookPaypal.verifyWebhook(webhookHeaders, event);
     if (!verified) throw statusError(400, "PayPal webhook signature verification failed");
     const resourceId = typeof event?.resource?.id === "string" ? event.resource.id : typeof event?.resource?.payout_batch_id === "string" ? event.resource.payout_batch_id : null;
-    const webhookWorkspaceId = await resolveWebhookWorkspace(ctx, event);
     const stored = await ctx.supabase.rpc<Record<string, any>>("royaltyos_store_verified_paypal_webhook", {
       p_workspace_id: webhookWorkspaceId,
       p_paypal_event_id: eventId,
@@ -221,7 +228,8 @@ export async function handleFinanceRoutes(
     // PayPal request id is derived from the batch the database actually returned, so a
     // repeat/concurrent execute always replays the same PayPal idempotent request.
     const payoutRequestId = sha256Hex(buildPayoutIdempotencyKey({ workspaceId: auth.workspaceId, settlementId: match.id!, version: Number(batch.payout_version) || version })).slice(0, 36);
-    const paypal = await ctx.paypal.createPayout(payoutRequestId, String(batch.id), items.map((item) => ({ recipientEmail: String(item.recipient_email), amountMinor: Number(item.amount_minor), currency: String(item.currency), note: ctx.config.paypal.payoutNote, senderItemId: String(item.sender_item_id) })));
+    const { gateway: payoutPaypal } = await paypalForWorkspace(ctx, auth.workspaceId);
+    const paypal = await payoutPaypal.createPayout(payoutRequestId, String(batch.id), items.map((item) => ({ recipientEmail: String(item.recipient_email), amountMinor: Number(item.amount_minor), currency: String(item.currency), note: ctx.config.paypal.payoutNote, senderItemId: String(item.sender_item_id) })));
     const paypalBatchId = paypal?.batch_header?.payout_batch_id;
     if (typeof paypalBatchId !== "string") throw new Error("PayPal payout did not return batch id");
     await ctx.supabase.rpc("royaltyos_mark_payout_submitted", { p_batch_id: batch.id, p_paypal_batch_id: paypalBatchId, p_correlation_id: payoutRequestId });
@@ -239,7 +247,8 @@ export async function handleFinanceRoutes(
     const batch = await ctx.supabase.rpc<Record<string, any>>("royaltyos_reserve_payout_retry", { p_settlement_id: match.id, p_actor_id: auth.user.id, p_idempotency_key: idempotencyKey });
     const items = await ctx.supabase.select<Record<string, any>>("payout_items", { select: "*", payout_batch_id: `eq.${batch.id}` });
     const retryRequestId = sha256Hex(buildPayoutIdempotencyKey({ workspaceId: auth.workspaceId, settlementId: match.id!, version: Number(batch.payout_version) || nextVersion })).slice(0, 36);
-    const paypal = await ctx.paypal.createPayout(retryRequestId, String(batch.id), items.map((item) => ({ recipientEmail: String(item.recipient_email), amountMinor: Number(item.amount_minor), currency: String(item.currency), note: `Retry: ${ctx.config.paypal.payoutNote}`, senderItemId: String(item.sender_item_id) })));
+    const { gateway: retryPaypal } = await paypalForWorkspace(ctx, auth.workspaceId);
+    const paypal = await retryPaypal.createPayout(retryRequestId, String(batch.id), items.map((item) => ({ recipientEmail: String(item.recipient_email), amountMinor: Number(item.amount_minor), currency: String(item.currency), note: `Retry: ${ctx.config.paypal.payoutNote}`, senderItemId: String(item.sender_item_id) })));
     const paypalBatchId = paypal?.batch_header?.payout_batch_id;
     if (typeof paypalBatchId !== "string") throw new Error("PayPal payout did not return batch id");
     await ctx.supabase.rpc("royaltyos_mark_payout_submitted", { p_batch_id: batch.id, p_paypal_batch_id: paypalBatchId });

@@ -6,8 +6,42 @@ import type { CandidateRule, ExecutableRule, RecoupmentState } from "../../packa
 import { extractionToCandidates, extractContractWithOpenAI } from "../../packages/ai/openai-contract.ts";
 import { extractContractWithVision } from "../../packages/ai/vision-contract.ts";
 import { validateContractUpload } from "../../packages/security/upload.ts";
+import { decryptSecret } from "../../packages/security/paypal-vault.ts";
+import { PayPalGateway } from "../../packages/paypal/gateway.ts";
 import type { AppContext } from "./context.ts";
 import { statusError } from "./http.ts";
+
+/**
+ * Resolves the PayPal gateway for a workspace: the workspace's own connected
+ * credentials when present, otherwise the global server credentials. Token
+ * caches live on the returned instance, so workspaces never share tokens.
+ * Throws when the workspace row exists but encryption is not configured.
+ */
+export async function paypalForWorkspace(
+  ctx: AppContext,
+  workspaceId: string,
+): Promise<{ gateway: PayPalGateway; source: "workspace" | "global"; webhookId: string }> {
+  const rows = await ctx.supabase.select<Record<string, any>>("workspace_paypal_accounts", {
+    select: "*",
+    workspace_id: `eq.${workspaceId}`,
+    limit: "1",
+  });
+  const row = rows[0];
+  if (!row) return { gateway: ctx.paypal, source: "global", webhookId: ctx.config.paypal.webhookId };
+  const key = ctx.config.security.paypalCredentialsKey;
+  if (!key) throw statusError(500, "PayPal credential encryption is not configured");
+  const gateway = new PayPalGateway(ctx.config, ctx.fetchImpl, {
+    clientId: String(row.paypal_client_id),
+    clientSecret: decryptSecret(row.paypal_client_secret_enc, key),
+    webhookId: row.paypal_webhook_id ? String(row.paypal_webhook_id) : undefined,
+    environment: row.environment === "live" ? "live" : "sandbox",
+  });
+  return {
+    gateway,
+    source: "workspace",
+    webhookId: row.paypal_webhook_id ? String(row.paypal_webhook_id) : ctx.config.paypal.webhookId,
+  };
+}
 
 function toCandidate(row: Record<string, any>): CandidateRule {
   return {

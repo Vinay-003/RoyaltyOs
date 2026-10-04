@@ -25,21 +25,35 @@ function moneyString(minor: number) {
   return `${Math.floor(minor / 100)}.${String(minor % 100).padStart(2, "0")}`;
 }
 
+export interface PayPalCredentialOverride {
+  clientId?: string | undefined;
+  clientSecret?: string | undefined;
+  webhookId?: string | undefined;
+  environment?: "sandbox" | "live";
+}
+
 export class PayPalGateway {
   private token: { accessToken: string; expiresAt: number } | null = null;
   private readonly config: AppConfig;
   private readonly fetchImpl: typeof fetch;
+  private readonly credentials: { clientId: string; clientSecret: string; webhookId: string; environment: "sandbox" | "live" };
   readonly baseUrl: string;
 
-  constructor(config: AppConfig, fetchImpl: typeof fetch = fetch) {
+  constructor(config: AppConfig, fetchImpl: typeof fetch = fetch, override?: PayPalCredentialOverride) {
     this.config = config;
     this.fetchImpl = fetchImpl;
-    this.baseUrl = config.paypal.environment === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
+    this.credentials = {
+      clientId: override?.clientId ?? config.paypal.clientId,
+      clientSecret: override?.clientSecret ?? config.paypal.clientSecret,
+      webhookId: override?.webhookId ?? config.paypal.webhookId,
+      environment: override?.environment ?? config.paypal.environment,
+    };
+    this.baseUrl = this.credentials.environment === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
   }
 
   async getAccessToken() {
     if (this.token && this.token.expiresAt > Date.now() + 60_000) return this.token.accessToken;
-    const auth = Buffer.from(`${this.config.paypal.clientId}:${this.config.paypal.clientSecret}`).toString("base64");
+    const auth = Buffer.from(`${this.credentials.clientId}:${this.credentials.clientSecret}`).toString("base64");
     const response = await fetchWithRetry(this.fetchImpl, `${this.baseUrl}/v1/oauth2/token`, {
       method: "POST",
       headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
@@ -169,7 +183,7 @@ export class PayPalGateway {
         transmission_id: headers.transmissionId,
         transmission_sig: headers.transmissionSig,
         transmission_time: headers.transmissionTime,
-        webhook_id: this.config.paypal.webhookId,
+        webhook_id: this.credentials.webhookId,
         webhook_event: webhookEvent,
       },
     });
@@ -178,6 +192,6 @@ export class PayPalGateway {
 
   async health() {
     const token = await this.getAccessToken();
-    return { oauthOk: Boolean(token), environment: this.config.paypal.environment };
+    return { oauthOk: Boolean(token), environment: this.credentials.environment };
   }
 }

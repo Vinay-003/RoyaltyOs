@@ -2,6 +2,31 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { invoiceIdFromLinks, PayPalGateway } from "../../packages/paypal/gateway.ts";
 
+test("credential override replaces global config without sharing token cache", async () => {
+  const oauthCalls: string[] = [];
+  const fetchImpl = async (url: any, init: any = {}) => {
+    if (String(url).endsWith("/v1/oauth2/token")) {
+      const presented = String(init.headers?.Authorization ?? "").replace(/^Basic /, "");
+      oauthCalls.push(presented);
+      return new Response(JSON.stringify({ access_token: `TOKEN-${oauthCalls.length}`, expires_in: 3600 }), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  const expected = Buffer.from("ws-id:ws-secret").toString("base64");
+  const workspace = new PayPalGateway(testConfig(), fetchImpl as any, { clientId: "ws-id", clientSecret: "ws-secret" });
+  const global = new PayPalGateway(testConfig(), fetchImpl as any);
+  assert.equal(await workspace.getAccessToken(), "TOKEN-1");
+  assert.equal(await workspace.getAccessToken(), "TOKEN-1", "second call reuses the instance cache");
+  assert.equal(await global.getAccessToken(), "TOKEN-2", "separate instances cache separately");
+  assert.equal(oauthCalls[0], expected, "override credentials drive OAuth, not global config");
+  assert.notEqual(oauthCalls[1], expected);
+  assert.equal(workspace.baseUrl, "https://api-m.sandbox.paypal.com");
+  const live = new PayPalGateway(testConfig(), fetchImpl as any, { environment: "live" });
+  assert.equal(live.baseUrl, "https://api-m.paypal.com");
+});
+
 test("invoice id is read off the bare self-link creation response",async()=>{
  const fetchImpl=async(url:any,init:any={})=>{
    if(String(url).endsWith("/v1/oauth2/token")) return new Response(JSON.stringify({access_token:"ACCESS",expires_in:3600}),{status:200,headers:{"Content-Type":"application/json"}});
