@@ -29,6 +29,14 @@ test("a 401 rotates to the next key immediately", async () => {
   assert.equal(calls(), 2);
 });
 
+test("a 402 quota-exhausted key rotates like a 429", async () => {
+  const { fetchImpl, seen, calls } = mockFetch([402, 200]);
+  const response = await openaiFetch(keys(), fetchImpl, "https://x.test/v1/responses", { method: "POST" });
+  assert.equal(response.status, 200);
+  assert.equal(calls(), 2);
+  assert.deepEqual(seen, ["Bearer key-primary", "Bearer key-fallback-1"]);
+});
+
 test("a 429 rotates instead of waiting out the quota", async () => {
   const { fetchImpl, seen, calls } = mockFetch([429, 429, 200]);
   const response = await openaiFetch(keys(), fetchImpl, "https://x.test/v1/responses", { method: "POST" });

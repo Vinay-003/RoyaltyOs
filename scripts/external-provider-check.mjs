@@ -59,7 +59,8 @@ function openaiKeys() {
 async function openaiPost(path, body) {
   let text = '';
   let status = 0;
-  for (const key of openaiKeys()) {
+  const keys = openaiKeys();
+  for (const key of keys) {
     const response = await fetch(`${openaiBaseUrl}${path}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
@@ -67,9 +68,13 @@ async function openaiPost(path, body) {
     });
     text = await response.text();
     status = response.status;
-    if (status !== 401 && status !== 429) break;
+    if (status !== 401 && status !== 402 && status !== 429) break;
   }
-  if (status < 200 || status >= 300) throw new Error(`${status} ${text}`);
+  if (status < 200 || status >= 300) {
+    throw new Error(
+      `${status} ${text}${(status === 401 || status === 402 || status === 429) ? ` (all ${keys.length} configured keys rejected)` : ""}`,
+    );
+  }
   return { status, text };
 }
 
@@ -78,8 +83,6 @@ if (paidAi) {
     const model = env.OPENAI_MODEL ?? 'gpt-6-astra';
     const { text } = await openaiPost('/responses',
       { model, store: false, input: 'Reply with exactly ROYALTYOS_OK', max_output_tokens: 300 });
-    const text = await response.text();
-    if (!response.ok) throw new Error(`${response.status} ${text}`);
     const body = JSON.parse(text);
     const output = body.output_text ?? body.output?.flatMap((i) => i.content ?? []).map((c) => c.text ?? '').join('') ?? '';
     if (!String(output).includes('ROYALTYOS_OK')) throw new Error(`unexpected response: ${String(output).slice(0, 200)}`);

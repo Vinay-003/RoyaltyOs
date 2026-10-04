@@ -103,8 +103,9 @@ await run('OpenAI API/model access', async () => {
   const model = env.OPENAI_MODEL ?? 'gpt-6-astra';
   const baseUrl = (env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '');
   // Portable across OpenAI and OpenAI-compatible gateways (some gateways only
-  // implement the list endpoint, not per-model GET). A 401/429 rotates to the
-  // next configured key.
+  // implement the list endpoint, not per-model GET). A 401/402/429 rotates to
+  // the next configured key. Note the list endpoint may stay 200 on
+  // quota-exhausted keys; generation endpoints enforce quota.
   let text = '';
   let status = 0;
   for (const key of keys) {
@@ -113,7 +114,7 @@ await run('OpenAI API/model access', async () => {
     });
     text = await response.text();
     status = response.status;
-    if (status !== 401 && status !== 429) break;
+    if (status !== 401 && status !== 402 && status !== 429) break;
   }
   if (status < 200 || status >= 300) throw new Error(`${status} ${text}`);
   try {

@@ -3,11 +3,12 @@ import { fetchWithRetry } from "../core/http-retry.ts";
 
 /**
  * OpenAI-compatible fetch with API-key fallback. Keys are tried in config
- * order; a 401 (revoked/limited key) or 429 (per-key quota exhausted) moves
- * to the next key immediately, while any other response — success or a real
- * request/server error — is returned as-is. Throws only when every key is
- * rejected, naming how many were tried. Per-key transient 5xx still retries
- * inside fetchWithRetry; 429 is excluded there so rotation stays immediate.
+ * order; a 401 (revoked key), 402 (per-key quota/billing exhausted) or 429
+ * (rate limited) moves to the next key immediately, while any other response
+ * — success or a real request/server error — is returned as-is. Throws only
+ * when every key is rejected, naming how many were tried. Per-key transient
+ * 5xx still retries inside fetchWithRetry; 429 is excluded there so rotation
+ * stays immediate.
  */
 export async function openaiFetch(
   config: AppConfig,
@@ -31,7 +32,7 @@ export async function openaiFetch(
         retryStatuses: [500, 502, 503, 504],
       },
     );
-    if (response.status !== 401 && response.status !== 429) return response;
+    if (response.status !== 401 && response.status !== 402 && response.status !== 429) return response;
     lastStatus = response.status;
     try { await response.arrayBuffer(); } catch { /* consume best effort */ }
   }
