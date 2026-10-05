@@ -13,15 +13,18 @@ test("PayPal AI layer refuses money-moving natural language before any model/too
 
 test("PayPal AI answers from server-side reads, never MCP tool calls",async()=>{
  let captured:any=null;
- const fetchImpl=async(_url:any,init:any)=>{captured=JSON.parse(init.body);return new Response(JSON.stringify({id:"resp_test",output_text:"2 paid invoices"}),{status:200,headers:{"Content-Type":"application/json"}})};
- const fakeGateway={listInvoices:async()=>({items:[{id:"INV-1",status:"PAID"},{id:"INV-2",status:"SENT"}],total_count:2})};
+ const fetchImpl=async(_url:any,init:any)=>{captured=JSON.parse(init.body);return new Response(JSON.stringify({id:"resp_test",output_text:"1 workspace invoice"}),{status:200,headers:{"Content-Type":"application/json"}})};
+ const fakeGateway={listInvoices:async()=>({items:[{id:"INV-OTHER",status:"PAID"},{id:"INV-1",status:"PAID"}],total_count:2})};
  const config=testConfig();
- const result=await runPayPalReadOnlyAssistant(config,fakeGateway as any,"List my invoices",fetchImpl as any);
- assert.equal(result.text,"2 paid invoices");
- assert.equal(result.invoiceCount,2);
+ const workspaceRecords=[{paypalInvoiceId:"INV-1",amount:"100.00 USD",status:"PAID",recipientEmail:"buyer@example.com"}];
+ const result=await runPayPalReadOnlyAssistant(config,fakeGateway as any,"List my invoices",fetchImpl as any,workspaceRecords);
+ assert.equal(result.text,"1 workspace invoice");
+ assert.equal(result.invoiceCount,1,"footer counts workspace records, not the merchant list");
  assert.deepEqual(result.tools,["server:list_invoices"]);
  assert.equal(captured.tools,undefined,"no MCP tool block is sent to any gateway");
- assert.match(JSON.stringify(captured.input),/INV-1/,"live PayPal data reaches the model as context");
+ assert.match(captured.input,/Workspace records \(1 invoice\(s\) owned by this workspace\)/);
+ assert.match(captured.input,/INV-1/,"workspace record reaches the model as context");
+ assert.match(captured.input,/may include other workspaces/,"merchant snapshot is labeled unscoped");
 });
 
 test("PayPal AI fails loud on empty answers instead of showing a blank box",async()=>{

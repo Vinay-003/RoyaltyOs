@@ -23,11 +23,19 @@ function trimInvoice(entry: any) {
   };
 }
 
+export interface WorkspaceInvoiceRecord {
+  paypalInvoiceId: string;
+  amount: string;
+  status: string;
+  recipientEmail: string;
+}
+
 export async function runPayPalReadOnlyAssistant(
   config: AppConfig,
   gateway: PayPalGateway,
   question: string,
   fetchImpl: typeof fetch = fetch,
+  workspaceInvoices: WorkspaceInvoiceRecord[] = [],
 ) {
   if (!config.paypalAi.enabled) throw new Error("PayPal AI assistant is disabled");
   if (!question.trim()) throw new Error("Question is required");
@@ -56,17 +64,18 @@ export async function runPayPalReadOnlyAssistant(
       model: config.ai.model,
       store: false,
       instructions: [
-        "You are the RoyaltyOS PayPal reconciliation assistant.",
-        "Answer ONLY from the PayPal snapshot below. Never invent invoices, amounts, or statuses.",
-        "If the question cannot be answered from the snapshot, say exactly what is visible and what is missing.",
+        "You are the RoyaltyOS PayPal reconciliation assistant for ONE workspace.",
+        "The workspace records below are authoritative for what this workspace owns. The live PayPal snapshot is merchant-scoped: it can contain invoices from OTHER workspaces sharing the merchant app — never attribute those to this workspace.",
+        "Answer from the workspace records first; use the live snapshot only to explain discrepancies (e.g. paid on PayPal but not yet recorded here).",
+        "Never invent invoices, amounts, or statuses. If the answer is not in the data, say exactly what is visible and what is missing.",
         "You cannot create, send, update, cancel, refund, capture or execute anything; say so if asked.",
       ].join(" "),
-      input: `Question: ${question}\n\nLive PayPal snapshot:\n${JSON.stringify(snapshot)}`,
+      input: `Question: ${question}\n\nWorkspace records (${workspaceInvoices.length} invoice(s) owned by this workspace):\n${JSON.stringify(workspaceInvoices)}\n\nLive PayPal merchant snapshot (may include other workspaces):\n${JSON.stringify(snapshot)}`,
     }),
   });
   const payload = await response.json();
   if (!response.ok) throw new Error(`PayPal AI request failed (${response.status}): ${JSON.stringify(payload)}`);
   const text = responseText(payload);
   if (!text) throw new Error("PayPal AI returned an empty answer; try again");
-  return { text, responseId: payload?.id ?? null, model: config.ai.model, tools: ["server:list_invoices"], invoiceCount: items.length };
+  return { text, responseId: payload?.id ?? null, model: config.ai.model, tools: ["server:list_invoices"], invoiceCount: workspaceInvoices.length };
 }
