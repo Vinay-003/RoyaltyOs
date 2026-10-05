@@ -3,7 +3,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://royaltyos.vinaybuilds.me/api/:path*"
+      "destination": "https://royaltyos-api-o45c.onrender.com/api/:path*"
     },
     {
       "source": "/(.*)",
