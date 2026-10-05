@@ -5,6 +5,7 @@ dist/
 .freebuff/
 .kilo/
 .playwright-mcp/
+.vercel/
 coverage/
 .DS_Store
 *.log

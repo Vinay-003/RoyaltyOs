@@ -4,6 +4,8 @@
 
 ### Added
 
+- Frontend hosted on Vercel (static + SPA fallback; `/api/*` rewrites proxy to the Render backend, so browser auth and origin checks work unchanged). Deploy from `apps/web/public` with the Vercel CLI; add the Vercel URL to `CORS_ORIGINS` on Render.
+
 - Mobile-responsive shell: collapsible drawer navigation with scrim, single-column grids, 16px inputs (no iOS zoom), tuned type scale; profile layout gaps fixed.
 - Deterministic advance cross-check: text extraction verifies RECOUPMENT advanceMinor against the single stated advance figure (repair loop fixes 10x/100x model errors); self-gating recoupment_remaining conditions rejected; review cards show advance/pre/post/conditions; simulator refetches the active RuleSet on every submit.
 - OpenAI fallback keys (`OPENAI_API_KEY_FALLBACK_1/2`, same provider): 401/429 rotates immediately across extraction, vision, assistant and ops scripts; exhaustion fails loud with the key count.
