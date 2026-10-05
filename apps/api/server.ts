@@ -42,13 +42,13 @@ function staticFile(urlPath: string) {
     }
   }
   // Canonical app entry + deep links fall back to the SPA shell.
-  if (clean === "/app" || clean.startsWith("/app/")) return path.join(publicDir, "index.html");
+  if (clean === "/app" || clean.startsWith("/app/")) return path.join(publicDir, "app.html");
   const requested = path.join(publicDir, clean);
   if (requested.startsWith(publicDir) && existsSync(requested) && statSync(requested).isFile()) return requested;
   // Legacy app deep links (e.g. /insights) keep serving the SPA shell.
-  if (clean.startsWith("/api/")) return path.join(publicDir, "index.html");
+  if (clean.startsWith("/api/")) return path.join(publicDir, "app.html");
   const legacyAppRoutes = new Set(["/insights", "/contracts", "/rule-graph", "/simulator", "/invoices", "/settlements", "/payouts", "/royalties", "/recipients", "/team", "/notifications", "/paypal-ai", "/audit", "/profile"]);
-  if (legacyAppRoutes.has(clean)) return path.join(publicDir, "index.html");
+  if (legacyAppRoutes.has(clean)) return path.join(publicDir, "app.html");
   return path.join(publicDir, "landing.html");
 }
 
@@ -75,7 +75,7 @@ export function createRoyaltyServer(ctx: AppContext = createAppContext()) {
       res.writeHead(200, {
         "Content-Type": contentTypes[ext] ?? "application/octet-stream",
         "Content-Length": body.length,
-        "Cache-Control": file.endsWith("index.html") || file.endsWith("landing.html") ? "no-cache" : "public, max-age=3600",
+        "Cache-Control": file.endsWith("app.html") || file.endsWith("landing.html") ? "no-cache" : "public, max-age=3600",
       });
       if (req.method === "HEAD") res.end(); else res.end(body);
     } catch (error) {

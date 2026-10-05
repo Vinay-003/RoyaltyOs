@@ -2,7 +2,14 @@
 
 ## Unreleased
 
+### Fixed
+
+- Fixed the `/` vs `/app` split on Vercel: the SPA shell moved from `index.html` to `app.html` so the static host's filesystem no longer shadows the landing rewrite. `/` serves the landing on both hosts; `/app*` and legacy deep links serve the shell.
+
 ### Added
+
+- Portfolio embedding without breaking clickjacking defense: `FRAME_ANCESTORS` env allowlist (fail-closed to `none`; strict https-origin validation), wired into Render blueprints + `.env.example`.
+- Contract upload rebuilt as an accessible dropzone (drag-drop, file chip, live requirement checks, inline errors, auto-scroll to review), `:focus-visible` rings, `prefers-reduced-motion` guards, tabular numerals.
 
 - Frontend hosted on Vercel (static + SPA fallback; `/api/*` rewrites proxy to the Render backend, so browser auth and origin checks work unchanged). Deploy from `apps/web/public` with the Vercel CLI; add the Vercel URL to `CORS_ORIGINS` on Render.
 

@@ -6,12 +6,16 @@
       "destination": "https://royaltyos-api-o45c.onrender.com/api/:path*"
     },
     {
+      "source": "/",
+      "destination": "/landing.html"
+    },
+    {
       "source": "/app",
-      "destination": "/index.html"
+      "destination": "/app.html"
     },
     {
       "source": "/app/:path*",
-      "destination": "/index.html"
+      "destination": "/app.html"
     },
     {
       "source": "/:route(insights|contracts|rule-graph|simulator|invoices|settlements|payouts|royalties|recipients|team|notifications|paypal-ai|audit|profile)",

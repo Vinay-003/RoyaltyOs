@@ -4,7 +4,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 
 function frontendSources(): string[] {
-  const files: string[] = ["apps/web/public/app.js", "apps/web/public/index.html"];
+  const files: string[] = ["apps/web/public/app.js", "apps/web/public/app.html", "apps/web/public/landing.html"];
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir)) {
       const full = path.join(dir, entry);
