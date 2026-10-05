@@ -41,6 +41,35 @@ test("SPA fallback opens /insights instead of returning a dead route", async () 
 });
 
 
+test("public landing lives at / and the app shell lives at /app", async () => {
+  const server = createRoyaltyServer({ config: testConfig() } as any);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const base = `http://127.0.0.1:${address.port}`;
+    const landing = await fetch(base + "/");
+    const landingHtml = await landing.text();
+    assert.equal(landing.status, 200, "/");
+    assert.match(landingHtml, /RoyaltyOS/, "/");
+    assert.match(landingHtml, /landing\.js/, "/");
+    assert.match(landingHtml, /landing\.css/, "/");
+    assert.doesNotMatch(landingHtml, /from "\.\/js\/router\.js"/, "/ is not the app shell");
+    for (const asset of ["/landing.css", "/landing.js"]) {
+      const response = await fetch(base + asset);
+      assert.equal(response.status, 200, asset);
+    }
+    for (const route of ["/app", "/app/insights", "/app/contracts"]) {
+      const response = await fetch(base + route, { headers: { Accept: "text/html" } });
+      const html = await response.text();
+      assert.equal(response.status, 200, route);
+      assert.match(html, /app\.js/, route);
+    }
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error: any) => error ? reject(error) : resolve()));
+  }
+});
+
 test("all documented SPA application routes return the shell instead of a server 404", async () => {
   const server = createRoyaltyServer({ config: testConfig() } as any);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -49,9 +78,11 @@ test("all documented SPA application routes return the shell instead of a server
     assert.ok(address && typeof address === "object");
     const base = `http://127.0.0.1:${address.port}`;
     const routes = [
-      "/", "/insights", "/contracts", "/rule-graph", "/simulator",
-      "/invoices", "/settlements", "/payouts", "/royalties", "/recipients",
-      "/team", "/notifications", "/paypal-ai", "/audit", "/profile",
+      "/app", "/app/insights", "/app/contracts", "/app/rule-graph", "/app/simulator",
+      "/app/invoices", "/app/settlements", "/app/payouts", "/app/royalties", "/app/recipients",
+      "/app/team", "/app/notifications", "/app/paypal-ai", "/app/audit", "/app/profile",
+      // Legacy deep links keep serving the app shell.
+      "/insights", "/contracts", "/settlements",
     ];
     for (const route of routes) {
       const response = await fetch(base + route, { headers: { Accept: "text/html" } });

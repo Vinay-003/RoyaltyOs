@@ -31,9 +31,24 @@ function activePublicDir() {
 function staticFile(urlPath: string) {
   const publicDir = activePublicDir();
   const clean = decodeURIComponent(urlPath).replace(/\.\./g, "");
-  const requested = path.join(publicDir, clean === "/" ? "index.html" : clean);
+  // Public marketing landing at `/`; authenticated SPA shell at `/app`.
+  if (clean === "/") return path.join(publicDir, "landing.html");
+  // Direct landing assets.
+  for (const asset of ["/landing.html", "/landing.css", "/landing.js"]) {
+    if (clean === asset) {
+      const file = path.join(publicDir, clean);
+      if (file.startsWith(publicDir) && existsSync(file) && statSync(file).isFile()) return file;
+    }
+  }
+  // Canonical app entry + deep links fall back to the SPA shell.
+  if (clean === "/app" || clean.startsWith("/app/")) return path.join(publicDir, "index.html");
+  const requested = path.join(publicDir, clean);
   if (requested.startsWith(publicDir) && existsSync(requested) && statSync(requested).isFile()) return requested;
-  return path.join(publicDir, "index.html");
+  // Legacy app deep links (e.g. /insights) keep serving the SPA shell.
+  if (clean.startsWith("/api/")) return path.join(publicDir, "index.html");
+  const legacyAppRoutes = new Set(["/insights", "/contracts", "/rule-graph", "/simulator", "/invoices", "/settlements", "/payouts", "/royalties", "/recipients", "/team", "/notifications", "/paypal-ai", "/audit", "/profile"]);
+  if (legacyAppRoutes.has(clean)) return path.join(publicDir, "index.html");
+  return path.join(publicDir, "landing.html");
 }
 
 export function createRoyaltyServer(ctx: AppContext = createAppContext()) {
@@ -59,7 +74,7 @@ export function createRoyaltyServer(ctx: AppContext = createAppContext()) {
       res.writeHead(200, {
         "Content-Type": contentTypes[ext] ?? "application/octet-stream",
         "Content-Length": body.length,
-        "Cache-Control": file.endsWith("index.html") ? "no-cache" : "public, max-age=3600",
+        "Cache-Control": file.endsWith("index.html") || file.endsWith("landing.html") ? "no-cache" : "public, max-age=3600",
       });
       if (req.method === "HEAD") res.end(); else res.end(body);
     } catch (error) {
@@ -83,15 +98,22 @@ export function startRoyaltyServer(ctx: AppContext = createAppContext()) {
 const entry = process.argv[1] ? path.resolve(process.argv[1]) : "";
 const self = fileURLToPath(import.meta.url);
 if (entry && path.resolve(self) === entry) {
-  try {
-    await ensureDatabaseMigrations({
-      databaseUrl: process.env.DATABASE_URL,
-      migrationsDir: path.resolve("supabase/migrations"),
-      log: (message) => console.log(message),
-    });
-  } catch (error) {
-    console.error(JSON.stringify({ level: "error", message: "Boot migrations failed; refusing to serve", error: error instanceof Error ? error.message : String(error) }));
-    process.exit(1);
+  // SKIP_BOOT_MIGRATIONS=true is an explicit local-preview escape hatch (e.g.
+  // DB unreachable, landing-page-only work). Production stays fail-closed:
+  // without the flag, a migration failure still refuses to serve.
+  if (process.env.SKIP_BOOT_MIGRATIONS === "true") {
+    console.log(JSON.stringify({ level: "warn", message: "SKIP_BOOT_MIGRATIONS=true; serving without applying migrations. API routes needing the database will fail per-request." }));
+  } else {
+    try {
+      await ensureDatabaseMigrations({
+        databaseUrl: process.env.DATABASE_URL,
+        migrationsDir: path.resolve("supabase/migrations"),
+        log: (message) => console.log(message),
+      });
+    } catch (error) {
+      console.error(JSON.stringify({ level: "error", message: "Boot migrations failed; refusing to serve", error: error instanceof Error ? error.message : String(error) }));
+      process.exit(1);
+    }
   }
   startRoyaltyServer();
 }

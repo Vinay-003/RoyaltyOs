@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "node --experimental-strip-types --watch apps/api/server.ts",
+    "dev:nodb": "SKIP_BOOT_MIGRATIONS=true node --experimental-strip-types --watch apps/api/server.ts",
     "start": "node dist/apps/api/server.js",
     "start:free": "node scripts/start-free.mjs",
     "worker": "node dist/apps/workflows/worker.js",

@@ -54,10 +54,19 @@ export class SupabaseClient {
       try { payload = JSON.parse(text); } catch { payload = text; }
     }
     if (!response.ok) {
-      const message = typeof payload === "object" && payload && "message" in payload
-        ? String((payload as Record<string, unknown>).message)
-        : typeof payload === "string" ? payload : `Supabase HTTP ${response.status}`;
-      throw new Error(message);
+      // GoTrue/Auth errors use { msg } or { error, error_description };
+      // PostgREST uses { message }. Surface the real text either way.
+      let message: string | null = null;
+      if (typeof payload === "object" && payload) {
+        const p = payload as Record<string, unknown>;
+        for (const field of ["message", "msg", "error_description"]) {
+          if (typeof p[field] === "string" && (p[field] as string).trim()) { message = (p[field] as string).trim(); break; }
+        }
+        if (!message && typeof p.error === "string" && p.error.trim()) message = p.error.trim();
+      } else if (typeof payload === "string" && payload.trim()) {
+        message = payload.trim();
+      }
+      throw new Error(message ?? `Supabase HTTP ${response.status}`);
     }
     return { response, payload };
   }

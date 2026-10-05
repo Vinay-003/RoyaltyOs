@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="RoyaltyOS — contract-to-revenue infrastructure. AI interprets contracts. Deterministic software calculates money. Humans authorize. PayPal moves it." />
+  <title>RoyaltyOS — Contract to revenue, with proof</title>
+  <link rel="stylesheet" href="/landing.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f7b84c'/%3E%3Ctext x='16' y='22' font-family='Georgia' font-size='18' font-weight='bold' text-anchor='middle' fill='%23142235'%3ER%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="l-nav" id="topnav">
+    <div class="l-wrap l-nav-in">
+      <a class="l-brand" href="#top" aria-label="RoyaltyOS home">
+        <span class="l-mark" aria-hidden="true">R</span>
+        <span class="l-brand-t"><strong>RoyaltyOS</strong><small>contract → revenue</small></span>
+      </a>
+      <nav class="l-links" aria-label="Primary">
+        <a href="#how">How it works</a>
+        <a href="#guarantees">Guarantees</a>
+        <a href="#demo">Demo</a>
+        <a href="#roles">Roles</a>
+        <a href="#docs">Docs</a>
+      </nav>
+      <div class="l-cta">
+        <a class="btn ghost sm" href="#demo">View demo</a>
+        <a class="btn sm" href="/app">Open app</a>
+      </div>
+      <button class="l-burger" id="burger" aria-label="Open menu" aria-expanded="false" aria-controls="mnav">☰</button>
+    </div>
+    <div class="l-mnav" id="mnav" hidden>
+      <a href="#how">How it works</a>
+      <a href="#guarantees">Guarantees</a>
+      <a href="#demo">Demo</a>
+      <a href="#roles">Roles</a>
+      <a href="#docs">Docs</a>
+      <a class="btn" href="/app">Open app</a>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- HERO -->
+    <section class="l-hero l-wrap" id="top">
+      <div class="l-hero-grid">
+        <div class="l-hero-copy">
+          <p class="eyebrow reveal">Contract-to-revenue infrastructure · v1.0.2</p>
+          <h1 class="reveal" style="--i:1">AI reads the deal.<br /><em>Code counts the money.</em></h1>
+          <p class="lede reveal" style="--i:2">RoyaltyOS turns PDF agreements into human-reviewed financial rules, reconciles PayPal revenue, and pays contributors — with every cent traceable to a clause, a rule, and an approval.</p>
+          <div class="l-hero-cta reveal" style="--i:3">
+            <a class="btn lg" href="/app">Open RoyaltyOS →</a>
+            <a class="btn secondary lg" href="#demo">Run the amendment demo</a>
+          </div>
+          <p class="boundary-line reveal" style="--i:4"><b>Boundary:</b> AI interprets. Deterministic software calculates. Humans authorize. PayPal moves money.</p>
+          <div class="l-trust reveal" style="--i:5" aria-label="Built on">
+            <span>Supabase</span><i>·</i><span>OpenAI Structured Outputs</span><i>·</i><span>PayPal Sandbox</span><i>·</i><span>ClamAV</span><i>·</i><span>Render</span>
+          </div>
+        </div>
+        <div class="l-hero-proof reveal" style="--i:2" id="tilt">
+          <div class="proof p1">
+            <div class="proof-h"><span class="badge amber">RULESET ACTIVE</span><span class="mono dim">a3f9…c41d</span></div>
+            <p class="proof-t">Producer · post-recoupment <b>20%</b></p>
+            <p class="proof-s">Frozen · hashed · compiler-validated</p>
+          </div>
+          <div class="proof p2">
+            <div class="proof-h"><span class="badge green">SETTLED</span><span class="mono dim">largest-remainder</span></div>
+            <p class="proof-n mono" data-count="12480">$0.00</p>
+            <p class="proof-s">Conserved to the cent · ledger balanced</p>
+          </div>
+          <div class="proof p3">
+            <div class="proof-h"><span class="badge green">PAYOUT SUCCESS</span><span class="mono dim">idempotent</span></div>
+            <p class="proof-t">PayPal batch · no duplicates</p>
+            <p class="proof-s">Approved by finance · step-up verified</p>
+          </div>
+        </div>
+      </div>
+      <canvas id="ledger" aria-hidden="true"></canvas>
+      <div class="l-watermark" aria-hidden="true">ROYALTY°S</div>
+    </section>
+
+    <!-- FLOW STRIP -->
+    <section class="l-strip" aria-label="Pipeline">
+      <div class="l-marquee">
+        <div class="l-marquee-in" aria-hidden="true">
+          <span>PDF</span><i>→</i><span>Rules</span><i>→</i><span>Revenue</span><i>→</i><span>Approval</span><i>→</i><span>Payout</span><i>→</i><span>Statement</span><i>→</i>
+          <span>PDF</span><i>→</i><span>Rules</span><i>→</i><span>Revenue</span><i>→</i><span>Approval</span><i>→</i><span>Payout</span><i>→</i><span>Statement</span><i>→</i>
+        </div>
+      </div>
+    </section>
+
+    <!-- HOW -->
+    <section class="l-wrap l-sec" id="how">
+      <p class="eyebrow reveal">How it works</p>
+      <h2 class="reveal">Four gates. No silent money.</h2>
+      <div class="l-steps">
+        <aside class="l-rail" aria-hidden="true"><span class="l-progress" id="progress"></span></aside>
+        <ol class="l-cards">
+          <li class="l-card reveal">
+            <span class="step">01</span>
+            <h3>Upload &amp; seal</h3>
+            <p>PDF magic-byte, size and page validation, SHA-256 hash, ClamAV scan in production, immutable version in private Supabase Storage.</p>
+            <p class="mono dim">contract_v3.pdf · sha256 9be2…77aa</p>
+          </li>
+          <li class="l-card reveal">
+            <span class="step">02</span>
+            <h3>AI extracts, humans decide</h3>
+            <p>OpenAI Responses API with strict JSON schema reads up to 3 prior versions, flags contradictions — ambiguous rules stay review-required until a person approves.</p>
+            <p><span class="badge amber">REVIEW_REQUIRED</span> <span class="mono dim">clause 4.2 vs amendment §2</span></p>
+          </li>
+          <li class="l-card reveal">
+            <span class="step">03</span>
+            <h3>Deterministic settlement</h3>
+            <p>Fixed-precision engine: percentages, recoupment, caps, floors, date gates, largest-remainder allocation. What-if simulations never post.</p>
+            <p class="mono dim">$12,480.00 → $2,496.00 + $9,984.00 · Σ conserved</p>
+          </li>
+          <li class="l-card reveal">
+            <span class="step">04</span>
+            <h3>Approve, then PayPal pays</h3>
+            <p>Finance re-authenticates, approves, executes idempotent payout batches. Webhooks + polls reconcile every item; only failed items retry, as a new version.</p>
+            <p><span class="badge green">PAYOUT SUCCESS</span> <span class="mono dim">batch 7f3a · key 1ca9…</span></p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- GUARANTEES -->
+    <section class="l-wrap l-sec" id="guarantees">
+      <p class="eyebrow reveal">Guarantees</p>
+      <h2 class="reveal">The LLM never touches money.</h2>
+      <div class="l-bento">
+        <article class="b b1 reveal"><h3>Deterministic engine</h3><p>Same rules + same revenue = same payout, every time. Money-conservation invariants enforced in SQL.</p></article>
+        <article class="b reveal" style="--i:1"><h3>Human approval gate</h3><p>Password step-up + finance role required. Approved lines are immutable.</p></article>
+        <article class="b reveal" style="--i:2"><h3>Idempotent payouts</h3><p>DB locks + unique payout version + PayPal ids. Retries can't double-pay.</p></article>
+        <article class="b reveal" style="--i:3"><h3>Hash-chained audit</h3><p>Every state change leaves a tamper-evident row. Integrity RPC on demand.</p></article>
+        <article class="b reveal" style="--i:4"><h3>Private contracts, scanned</h3><p>Immutable versions in a private bucket. Malware scan fails closed.</p></article>
+        <article class="b reveal" style="--i:5"><h3>Read-only PayPal AI</h3><p>Official PayPal MCP, restricted to list/get. Mutation prompts rejected pre-call.</p></article>
+      </div>
+    </section>
+
+    <!-- DEMO -->
+    <section class="l-wrap l-sec" id="demo">
+      <p class="eyebrow reveal">Amendment demo</p>
+      <h2 class="reveal">Watch a 5% change get caught.</h2>
+      <p class="lede sm reveal">The demo amendment cuts Producer's post-recoupment share from 20% to 15%. RoyaltyOS surfaces it for human review instead of silently activating.</p>
+      <div class="l-demo reveal">
+        <div class="l-tabs" role="tablist" aria-label="Contract versions">
+          <button class="on" id="tab1" role="tab" aria-selected="true">v1 · agreement</button>
+          <button id="tab2" role="tab" aria-selected="false">v2 · amendment</button>
+        </div>
+        <div class="l-diff">
+          <div class="d-row"><span>Producer post-recoupment</span><b class="mono" id="dOld">20%</b></div>
+          <div class="d-row new"><span>Producer post-recoupment</span><b class="mono" id="dNew">20%</b></div>
+          <p class="d-flag" id="dFlag"><span class="badge green">CONSISTENT</span> no conflict with prior versions</p>
+        </div>
+        <div class="l-demo-cta">
+          <a class="btn" href="/app/contracts">Open in Contracts →</a>
+          <span class="mono dim">fixtures/demo/royaltyos-demo-agreement-v1.pdf</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ROLES -->
+    <section class="l-wrap l-sec" id="roles">
+      <p class="eyebrow reveal">Who does what</p>
+      <h2 class="reveal">Four seats, one ledger.</h2>
+      <div class="l-roles">
+        <article class="reveal"><h3>Contract Manager</h3><p>Creates contracts, uploads PDFs, runs AI analysis, shepherds review → activation.</p></article>
+        <article class="reveal" style="--i:1"><h3>Finance</h3><p>Reviews settlements, verifies identity, approves, executes and retries payouts.</p></article>
+        <article class="reveal" style="--i:2"><h3>Contributor</h3><p>Sees only their own lines — clause → rule → revenue → payout, end to end.</p></article>
+        <article class="reveal" style="--i:3"><h3>Auditor</h3><p>Reads Insights + Audit: hash chains, ledger balance, CSV exports. No pay buttons.</p></article>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="l-wrap l-sec" id="docs">
+      <div class="l-cta-card reveal">
+        <div>
+          <p class="eyebrow">Start in minutes</p>
+          <h2>Open the sandbox control room.</h2>
+          <p>Sign in, bootstrap a workspace, upload the demo PDFs, and follow the User Flow to your first reconciled payout.</p>
+        </div>
+        <div class="l-cta-btns">
+          <a class="btn lg light" href="/app">Open RoyaltyOS →</a>
+          <a class="btn lg outline-light" href="/app/insights">View Insights</a>
+        </div>
+        <ul class="l-doclinks">
+          <li><a href="/app/contracts">User flow: contracts → payouts</a></li>
+          <li><a href="/app/audit">Audit &amp; ledger integrity</a></li>
+          <li><a href="/app/paypal-ai">PayPal AI (read-only)</a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="l-foot">
+    <div class="l-wrap l-foot-in">
+      <div class="l-brand"><span class="l-mark" aria-hidden="true">R</span><span class="l-brand-t"><strong>RoyaltyOS</strong><small id="ver">v1.0.2 · PayPal Sandbox</small></span></div>
+      <nav aria-label="Footer"><a href="/app">App</a><a href="#demo">Demo</a><a href="#docs">Docs</a><a href="#top">Top ↑</a></nav>
+      <p class="dim">AI interprets. Software calculates. Humans authorize. PayPal moves money.</p>
+    </div>
+  </footer>
+
+  <script src="/landing.js"></script>
+</body>
+</html>

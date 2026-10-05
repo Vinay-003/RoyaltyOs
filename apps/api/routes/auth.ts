@@ -49,7 +49,17 @@ export async function handleAuthRoutes(
     const body = await readJson(req, 1024 * 1024);
     const email = requireEmail(body.email);
     const password = requireString(body.password, "password", 200);
-    const auth = await ctx.supabase.signIn(email, password);
+    let auth;
+    try {
+      auth = await ctx.supabase.signIn(email, password);
+    } catch (error) {
+      // Never leak provider internals or distinguish bad-email vs bad-password.
+      const detail = error instanceof Error ? error.message : "";
+      if (/email not confirmed/i.test(detail)) {
+        throw statusError(401, "Please confirm your email address first. Check your inbox for the confirmation link, then sign in again.", "EMAIL_NOT_CONFIRMED");
+      }
+      throw statusError(401, "Incorrect email or password. Please try again.", "INVALID_CREDENTIALS");
+    }
     const boot = await bootstrapForUser(ctx, auth.user.id);
     json(res, 200, { user: auth.user, expires_in: auth.expires_in, bootstrap: boot }, authCookieHeaders(auth, ctx.config.nodeEnv));
     return true;
