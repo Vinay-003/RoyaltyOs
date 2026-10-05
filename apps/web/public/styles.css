@@ -35,3 +35,21 @@ input.input,select.input,textarea.textarea{font-size:16px}
 .card-head>*,.row>*,.topbar>*{min-width:0}
 .mono,.kicker{overflow-wrap:anywhere}
 .stack>*,.grid2>*,.grid3>*,.flow>*,.metrics>*{min-width:0;min-inline-size:0}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.num,.metric strong,.amount{font-variant-numeric:tabular-nums}
+@media(prefers-reduced-motion:reduce){.spin,.skel,.sidebar,.mobile-toggle,.btn,.nav a{animation:none!important;transition:none!important}}
+.dropzone{border:1.5px dashed var(--line);border-radius:14px;padding:26px 18px;text-align:center;background:color-mix(in srgb,var(--card) 60%,transparent);cursor:pointer;transition:border-color .2s ease,background .2s ease}
+.dropzone:hover,.dropzone.over{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,var(--card))}
+.dropzone input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.dz-title{font-size:16px;margin:8px 0 2px}
+.dz-sub{color:var(--muted);font-size:13px;margin:0 0 4px}
+.dz-sub label{color:var(--accent);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.dz-chip{display:inline-flex;align-items:center;gap:8px;margin-top:10px;padding:7px 8px 7px 12px;border:1px solid var(--line);border-radius:999px;background:var(--bg);font-size:13px;max-width:100%}
+.dz-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46vw}
+.dz-chip button{border:1px solid var(--line);background:var(--card);border-radius:999px;width:22px;height:22px;line-height:1;cursor:pointer;color:var(--ink)}
+.dz-checks{list-style:none;margin:12px auto 0;padding:0;display:inline-block;text-align:left;font-size:13px;color:var(--muted)}
+.dz-checks li{padding:2px 0}
+.dz-checks li.ok{color:var(--ink)}
+.dz-checks li.ok::before{content:"✓ ";color:var(--good)}
+.dz-checks li.no::before{content:"– "}
+@media(max-width:520px){.dropzone{padding:20px 12px}.dz-chip span{max-width:60vw}}

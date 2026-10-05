@@ -7,6 +7,7 @@ import { createAppContext, type AppContext } from "./context.ts";
 import { handleApi } from "./router.ts";
 import { json, text } from "./http.ts";
 import { ensureDatabaseMigrations } from "../../packages/db/migrate.ts";
+import { frameAncestorsDirective } from "../../packages/core/frame-ancestors.ts";
 
 const sourcePublicDir = path.resolve("apps/web/public");
 const compiledPublicDir = path.resolve("dist/apps/web/public");
@@ -60,7 +61,7 @@ export function createRoyaltyServer(ctx: AppContext = createAppContext()) {
     res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
     res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
     res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
-    res.setHeader("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://*.supabase.co https://api-m.sandbox.paypal.com https://api-m.paypal.com https://api.openai.com https://mcp.sandbox.paypal.com https://mcp.paypal.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+    res.setHeader("Content-Security-Policy", `default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://*.supabase.co https://api-m.sandbox.paypal.com https://api-m.paypal.com https://api.openai.com https://mcp.sandbox.paypal.com https://mcp.paypal.com; frame-ancestors ${frameAncestorsDirective(process.env.FRAME_ANCESTORS)}; base-uri 'self'; form-action 'self'`);
     try {
       const url = new URL(req.url ?? "/", ctx.config.appBaseUrl);
       if (url.pathname.startsWith("/api/")) {
