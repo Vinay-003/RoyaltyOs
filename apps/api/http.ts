@@ -67,6 +67,32 @@ export function cookieValue(req: IncomingMessage, name: string) {
   return null;
 }
 
+export type SessionTtl = { absoluteSeconds?: number; idleSeconds?: number };
+
+/** Default absolute session lifetime: seven days from sign-in. */
+export const SESSION_ABSOLUTE_TTL_SECONDS = 7 * 24 * 3600;
+/** Default idle window: a quiet session must sign in again after one day. */
+export const SESSION_IDLE_TTL_SECONDS = 24 * 3600;
+/**
+ * Browser lifetime of the expiry cookies. Deliberately longer than the
+ * server-enforced windows so the server can still read an expired value and
+ * answer SESSION_EXPIRED instead of failing with a generic 401.
+ */
+const EXPIRY_COOKIE_MAX_AGE = 30 * 24 * 3600;
+
+function expiryCookies(nodeEnv: string, ttl: SessionTtl, now: number) {
+  const secure = nodeEnv === "production" ? "; Secure" : "";
+  const common = `Path=/; HttpOnly; SameSite=Strict${secure}`;
+  const absolute = Math.max(60, ttl.absoluteSeconds ?? SESSION_ABSOLUTE_TTL_SECONDS);
+  const idle = Math.max(60, ttl.idleSeconds ?? SESSION_IDLE_TTL_SECONDS);
+  const maxAge = Math.max(EXPIRY_COOKIE_MAX_AGE, absolute * 2, idle * 2);
+  const at = (seconds: number) => Math.floor((now + seconds * 1000) / 1000);
+  return {
+    session: `royaltyos_session_exp=${at(absolute)}; Max-Age=${maxAge}; ${common}`,
+    idle: `royaltyos_idle_exp=${at(idle)}; Max-Age=${maxAge}; ${common}`,
+  };
+}
+
 export function bearerToken(req: IncomingMessage) {
   const value = req.headers.authorization;
   if (value?.startsWith("Bearer ")) return value.slice(7).trim();
@@ -75,19 +101,43 @@ export function bearerToken(req: IncomingMessage) {
   throw statusError(401, "Authentication required");
 }
 
+/**
+ * Rejects requests whose session has hit its absolute lifetime or idle window.
+ * Requests with no expiry cookies at all (Bearer/CLI clients, sessions created
+ * before expiry cookies existed) are allowed through; those sessions pick up
+ * expiry cookies on their next refresh.
+ */
+export function assertSessionFresh(req: IncomingMessage) {
+  const session = cookieValue(req, "royaltyos_session_exp");
+  const idle = cookieValue(req, "royaltyos_idle_exp");
+  if (session === null && idle === null) return;
+  const now = Math.floor(Date.now() / 1000);
+  const stale = (value: string | null) =>
+    value === null || !Number.isFinite(Number(value)) || Number(value) <= now;
+  if (stale(session) || stale(idle)) {
+    throw statusError(401, "Session expired. Please sign in again.", "SESSION_EXPIRED");
+  }
+}
+
 export function authCookieHeaders(
   auth: { access_token: string; refresh_token: string; expires_in?: number },
   nodeEnv: string,
+  ttl: SessionTtl = {},
+  opts: { issueSession?: boolean } = {},
 ) {
   const secure = nodeEnv === "production" ? "; Secure" : "";
   const accessMaxAge = Math.max(60, Number(auth.expires_in ?? 3600) - 30);
   const common = `Path=/; HttpOnly; SameSite=Strict${secure}`;
-  return {
-    "Set-Cookie": [
-      `royaltyos_access=${encodeURIComponent(auth.access_token)}; Max-Age=${accessMaxAge}; ${common}`,
-      `royaltyos_refresh=${encodeURIComponent(auth.refresh_token)}; Max-Age=${60 * 60 * 24 * 30}; ${common}`,
-    ],
-  };
+  const expiry = expiryCookies(nodeEnv, ttl, Date.now());
+  const cookies = [
+    `royaltyos_access=${encodeURIComponent(auth.access_token)}; Max-Age=${accessMaxAge}; ${common}`,
+    `royaltyos_refresh=${encodeURIComponent(auth.refresh_token)}; Max-Age=${60 * 60 * 24 * 30}; ${common}`,
+  ];
+  // Refresh keeps the absolute deadline issued at sign-in and only slides the
+  // idle window, so a session cannot extend itself indefinitely.
+  if (opts.issueSession !== false) cookies.push(expiry.session);
+  cookies.push(expiry.idle);
+  return { "Set-Cookie": cookies };
 }
 
 export function clearAuthCookieHeaders(nodeEnv: string) {
@@ -97,6 +147,8 @@ export function clearAuthCookieHeaders(nodeEnv: string) {
     "Set-Cookie": [
       `royaltyos_access=; Max-Age=0; ${common}`,
       `royaltyos_refresh=; Max-Age=0; ${common}`,
+      `royaltyos_session_exp=; Max-Age=0; ${common}`,
+      `royaltyos_idle_exp=; Max-Age=0; ${common}`,
     ],
   };
 }

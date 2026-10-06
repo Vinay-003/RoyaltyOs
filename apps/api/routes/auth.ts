@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { authorizeWorkspace, principal } from "../auth.ts";
 import type { AppContext } from "../context.ts";
 import {
+  assertSessionFresh,
   authCookieHeaders,
   clearAuthCookieHeaders,
   cookieValue,
@@ -24,6 +25,10 @@ export async function handleAuthRoutes(
 ): Promise<boolean> {
   const method = req.method ?? "GET";
   const path = url.pathname;
+  const sessionTtl = {
+    absoluteSeconds: ctx.config.security.sessionAbsoluteTtlSeconds,
+    idleSeconds: ctx.config.security.sessionIdleTtlSeconds,
+  };
 
   if (method === "POST" && path === "/api/v1/auth/register") {
     await enforceRateLimit(ctx, `auth-register:${clientIpHash(req)}`, 8, 900);
@@ -40,7 +45,7 @@ export async function handleAuthRoutes(
     const tokenLike = out as Record<string, unknown>;
     const hasSession = typeof tokenLike.access_token === "string" && typeof tokenLike.refresh_token === "string";
     const safe = { user: tokenLike.user ?? null, sessionCreated: hasSession };
-    json(res, 201, safe, hasSession ? authCookieHeaders(tokenLike as any, ctx.config.nodeEnv) : {});
+    json(res, 201, safe, hasSession ? authCookieHeaders(tokenLike as any, ctx.config.nodeEnv, sessionTtl) : {});
     return true;
   }
 
@@ -61,7 +66,7 @@ export async function handleAuthRoutes(
       throw statusError(401, "Incorrect email or password. Please try again.", "INVALID_CREDENTIALS");
     }
     const boot = await bootstrapForUser(ctx, auth.user.id);
-    json(res, 200, { user: auth.user, expires_in: auth.expires_in, bootstrap: boot }, authCookieHeaders(auth, ctx.config.nodeEnv));
+    json(res, 200, { user: auth.user, expires_in: auth.expires_in, bootstrap: boot }, authCookieHeaders(auth, ctx.config.nodeEnv, sessionTtl));
     return true;
   }
 
@@ -71,8 +76,13 @@ export async function handleAuthRoutes(
       ? requireString(body.refreshToken, "refreshToken", 4096)
       : cookieValue(req, "royaltyos_refresh");
     if (!refreshToken) throw statusError(401, "Refresh session required");
+    assertSessionFresh(req);
     const auth = await ctx.supabase.refreshSession(refreshToken);
-    json(res, 200, { user: auth.user, expires_in: auth.expires_in }, authCookieHeaders(auth, ctx.config.nodeEnv));
+    // A session that predates expiry cookies picks them up on this refresh;
+    // every later refresh only slides the idle window and keeps the absolute
+    // deadline issued at sign-in.
+    const issueSession = cookieValue(req, "royaltyos_session_exp") === null;
+    json(res, 200, { user: auth.user, expires_in: auth.expires_in }, authCookieHeaders(auth, ctx.config.nodeEnv, sessionTtl, { issueSession }));
     return true;
   }
 

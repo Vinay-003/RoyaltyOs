@@ -1,6 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import type { AppContext } from "./context.ts";
-import { bearerToken, statusError } from "./http.ts";
+import { assertSessionFresh, bearerToken, statusError } from "./http.ts";
 
 function jwtIssuedAt(token: string) {
   const part = token.split(".")[1];
@@ -14,6 +14,7 @@ function jwtIssuedAt(token: string) {
 
 export async function principal(ctx: AppContext, req: IncomingMessage) {
   const token = bearerToken(req);
+  assertSessionFresh(req);
   const user = await ctx.supabase.verifyUser(token);
   if (!user?.id) throw statusError(401, "Invalid access token");
   const revokedBefore = await ctx.repo.sessionRevokedBefore(user.id);

@@ -16,13 +16,24 @@ import { settlements } from "./pages/settlements.js";
 import { simulator } from "./pages/simulator.js";
 import { state } from "./state.js";
 import { team } from "./pages/team.js";
-import { esc, hero, loadingView, path } from "./utils.js";
+import { esc, hero, loadingView, path, toast } from "./utils.js";
 
 export function navTo(p){history.pushState({},"",p);render()}
 
+const GATEWAY=new Set([502,503,504]);
+
+function errorView(e){
+  if(GATEWAY.has(e.status)){
+    shell(`${hero("CONNECTION","RoyaltyOS is unreachable.","The server may be waking up from idle; a free-tier cold start usually finishes within a minute.")}<div class="notice"><button class="btn" id="retryView">Try again</button></div>`,"Connection");
+    document.getElementById("retryView")?.addEventListener("click",()=>render());
+    return;
+  }
+  shell(`${hero("ERROR","This view could not load.",e.message)}<div class="notice error">${esc(e.stack||e.message)}</div>`,"Error");
+}
+
 export async function render(){
-  if(!state.me){const me=await loadMe();if(!me){loginView();return}}
   try{
+    if(!state.me){const me=await loadMe();if(!me){loginView();return}}
     const raw=path();
     const p=raw==="/app"||raw.startsWith("/app/")?raw.slice(4)||"/":raw;
     shell(loadingView(p),"Loading");
@@ -42,5 +53,12 @@ export async function render(){
     if(p==="/audit")return await audit();
     if(p==="/profile")return await profile();
     navTo("/app");
-  }catch(e){shell(`${hero("ERROR","This view could not load.",e.message)}<div class="notice error">${esc(e.stack||e.message)}</div>`,"Error")}
+  }catch(e){errorView(e)}
+}
+
+/** Called when the refresh endpoint rejects the session: send them to sign in. */
+export function sessionExpired(){
+  state.me=null;
+  loginView();
+  toast("Your session expired. Please sign in again.",6000);
 }

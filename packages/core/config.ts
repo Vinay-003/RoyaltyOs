@@ -79,6 +79,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     },
     security: {
       stepUpTtlSeconds: optionalInt("STEP_UP_TTL_SECONDS", 900, env),
+      // Absolute lifetime of a signed-in session, and the idle window after
+      // which a quiet session must sign in again. Both are enforced server-side
+      // from the session expiry cookies issued at login and refreshed on use.
+      sessionAbsoluteTtlSeconds: optionalInt("SESSION_ABSOLUTE_TTL_SECONDS", 7 * 24 * 3600, env),
+      sessionIdleTtlSeconds: optionalInt("SESSION_IDLE_TTL_SECONDS", 24 * 3600, env),
       maxUploadBytes: optionalInt("MAX_UPLOAD_BYTES", 10 * 1024 * 1024, env),
       maxPdfPages: optionalInt("MAX_PDF_PAGES", 100, env),
       malwareScanMode: env.MALWARE_SCAN_MODE ?? "disabled",
