@@ -53,6 +53,20 @@ CORS_ORIGINS=https://YOUR_API.onrender.com
 
 Both API and worker require the same provider/database secrets. The API is the only public service. The worker polls Supabase's transactional outbox. ClamAV is private-network only.
 
+## Triggering a deploy
+
+`render.yaml` sets `autoDeploy: false`, so pushing to GitHub does not redeploy
+the API. Copy the service deploy hook (Render Dashboard → the API service →
+Deploy → Deploy hook) into your local gitignored `.env` as `RENDER_DEPLOY_HOOK`
+and trigger it with:
+
+```bash
+curl "$RENDER_DEPLOY_HOOK"
+```
+
+The response returns the deploy id; the service keeps serving the previous
+instance until the new one is healthy, then swaps (typically under a minute).
+
 ## First deployment sequence
 
 1. Deploy the Blueprint with PayPal webhook ID temporarily set to a placeholder only if Render requires the field to start.
