@@ -42,7 +42,7 @@
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.10",
-    "pdfjs-dist": "^6.3.289",
+    "pdfjs-dist": "^6.4.299",
     "pg": "^8.23.1"
   }
 }
