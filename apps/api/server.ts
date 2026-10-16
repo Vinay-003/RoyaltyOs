@@ -52,9 +52,14 @@ function staticFile(urlPath: string) {
   return path.join(publicDir, "landing.html");
 }
 
+import { logEvent } from "./logger.ts";
+
 export function createRoyaltyServer(ctx: AppContext = createAppContext()) {
   return createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const requestId = randomUUID();
+    const startTime = Date.now();
+    const method = req.method ?? "GET";
+    const remoteIp = req.socket?.remoteAddress;
     res.setHeader("X-Request-Id", requestId);
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
@@ -65,7 +70,10 @@ export function createRoyaltyServer(ctx: AppContext = createAppContext()) {
     try {
       const url = new URL(req.url ?? "/", ctx.config.appBaseUrl);
       if (url.pathname.startsWith("/api/")) {
+        logEvent("info", "HTTP_REQUEST_START", { requestId, method, path: url.pathname, remoteIp });
         await handleApi(ctx, req, res, url, requestId);
+        const durationMs = Date.now() - startTime;
+        logEvent("info", "HTTP_REQUEST_FINISH", { requestId, method, path: url.pathname, statusCode: res.statusCode, durationMs });
         return;
       }
       if (req.method !== "GET" && req.method !== "HEAD") return text(res, 405, "Method not allowed");
@@ -81,7 +89,17 @@ export function createRoyaltyServer(ctx: AppContext = createAppContext()) {
     } catch (error) {
       const e = error as Error & { status?: number; code?: string };
       const status = e.status ?? (e.message.includes("JWT") || e.message.toLowerCase().includes("auth") ? 401 : 500);
-      if (status >= 500) console.error(JSON.stringify({ level: "error", requestId, message: e.message, stack: e.stack }));
+      const durationMs = Date.now() - startTime;
+      logEvent(status >= 500 ? "error" : "warn", "HTTP_REQUEST_ERROR", {
+        requestId,
+        method,
+        path: req.url,
+        statusCode: status,
+        durationMs,
+        error: e.message,
+        code: e.code ?? null,
+        stack: e.stack,
+      });
       if (!res.headersSent) json(res, status, { error: e.message, code: e.code ?? null, requestId });
       else res.end();
     }
@@ -91,7 +109,7 @@ export function createRoyaltyServer(ctx: AppContext = createAppContext()) {
 export function startRoyaltyServer(ctx: AppContext = createAppContext()) {
   const server = createRoyaltyServer(ctx);
   server.listen(ctx.config.port, "0.0.0.0", () => {
-    console.log(JSON.stringify({ level: "info", message: "RoyaltyOS API listening", port: ctx.config.port, version: ctx.config.appVersion }));
+    logEvent("info", "SERVER_STARTED", { port: ctx.config.port, version: ctx.config.appVersion, nodeEnv: process.env.NODE_ENV });
   });
   return server;
 }

@@ -20,6 +20,7 @@ import {
 import { sha256Hex } from "../../../packages/core/hash.ts";
 import { buildPayoutIdempotencyKey } from "../../../packages/paypal/idempotency.ts";
 import { ALL_READ_ROLES, FINANCE_ROLES, header, idempotencyHeader, listSettlementViews, resolveWebhookWorkspace, workspaceFromProject } from "./helpers.ts";
+import { logEvent } from "../logger.ts";
 
 export async function handleFinanceRoutes(
   ctx: AppContext,
@@ -51,6 +52,7 @@ export async function handleFinanceRoutes(
     const recipientEmail = requireEmail(body.recipientEmail, "recipientEmail");
     const itemName = requireString(body.itemName, "itemName", 250);
     const idempotencyKey = idempotencyHeader(req);
+    logEvent("info", "API_INVOICE_CREATE_REQUEST", { workspaceId, projectId, amountMinor, recipientEmail, itemName });
     const existing = await ctx.supabase.select<Record<string, any>>("invoices", { select: "*", workspace_id: `eq.${workspaceId}`, request_id: `eq.${idempotencyKey}`, limit: "1" });
     if (existing[0]) {
       json(res, 200, existing[0]);
@@ -65,6 +67,7 @@ export async function handleFinanceRoutes(
     if (typeof paypal?.id !== "string") throw new Error("PayPal did not return an invoice id");
     const rows = await ctx.supabase.insert<Record<string, any>>("invoices", { workspace_id: workspaceId, project_id: projectId, created_by: user.id, paypal_invoice_id: paypal.id, recipient_email: recipientEmail, item_name: itemName, amount_minor: amountMinor, currency: body.currency ?? ctx.config.paypal.currency, status: paypal.status ?? "DRAFT", recipient_view_url: paypal?.detail?.metadata?.recipient_view_url ?? null, request_id: idempotencyKey });
     await ctx.supabase.rpc("royaltyos_append_audit", { p_workspace_id: workspaceId, p_actor_id: user.id, p_action: "INVOICE_CREATED", p_resource_type: "INVOICE", p_resource_id: String(rows[0]?.id), p_detail: `PayPal draft invoice ${paypal.id} created`, p_correlation_id: requestId });
+    logEvent("info", "API_INVOICE_CREATED", { invoiceId: rows[0]?.id, paypalInvoiceId: paypal.id, status: rows[0]?.status });
     json(res, 201, rows[0]);
     return true;
   }
@@ -74,12 +77,14 @@ export async function handleFinanceRoutes(
     const auth = await authorizeByResource(ctx, req, "invoices", match.id!, FINANCE_ROLES);
     const invoice = (await ctx.supabase.select<Record<string, any>>("invoices", { select: "*", id: `eq.${match.id}`, limit: "1" }))[0];
     if (!invoice) throw statusError(404, "Invoice not found");
+    logEvent("info", "API_INVOICE_SEND_REQUEST", { invoiceId: match.id, paypalInvoiceId: invoice.paypal_invoice_id });
     const sendRequestId = sha256Hex(`send|${invoice.id}`).slice(0, 36);
     const { gateway: sendPaypal } = await paypalForWorkspace(ctx, auth.workspaceId);
     await sendPaypal.sendInvoice(String(invoice.paypal_invoice_id), sendRequestId);
     const authoritative = await sendPaypal.getInvoice(String(invoice.paypal_invoice_id));
     const rows = await ctx.supabase.update<Record<string, any>>("invoices", { status: authoritative.status ?? "SENT", recipient_view_url: authoritative?.detail?.metadata?.recipient_view_url ?? invoice.recipient_view_url, updated_at: new Date().toISOString() }, { id: `eq.${match.id}` });
     await ctx.supabase.rpc("royaltyos_append_audit", { p_workspace_id: auth.workspaceId, p_actor_id: auth.user.id, p_action: "INVOICE_SENT", p_resource_type: "INVOICE", p_resource_id: match.id, p_detail: `PayPal invoice ${invoice.paypal_invoice_id} sent`, p_correlation_id: sendRequestId });
+    logEvent("info", "API_INVOICE_SENT", { invoiceId: match.id, status: authoritative.status });
     json(res, 200, rows[0]);
     return true;
   }
@@ -92,6 +97,7 @@ export async function handleFinanceRoutes(
     const auth = await authorizeByResource(ctx, req, "invoices", match.id!, FINANCE_ROLES);
     const invoice = (await ctx.supabase.select<Record<string, any>>("invoices", { select: "*", id: `eq.${match.id}`, limit: "1" }))[0];
     if (!invoice) throw statusError(404, "Invoice not found");
+    logEvent("info", "API_INVOICE_REFRESH_REQUEST", { invoiceId: match.id, paypalInvoiceId: invoice.paypal_invoice_id });
     const { gateway: refreshPaypal } = await paypalForWorkspace(ctx, auth.workspaceId);
     const authoritative = await refreshPaypal.getInvoice(String(invoice.paypal_invoice_id));
     const reconciled = reconcileInvoiceState(
@@ -119,6 +125,7 @@ export async function handleFinanceRoutes(
       });
     }
     await ctx.supabase.rpc("royaltyos_append_audit", { p_workspace_id: auth.workspaceId, p_actor_id: auth.user.id, p_action: "INVOICE_REFRESHED", p_resource_type: "INVOICE", p_resource_id: match.id, p_detail: `PayPal invoice ${invoice.paypal_invoice_id} refreshed: ${reconciled.status}`, p_correlation_id: null });
+    logEvent("info", "API_INVOICE_REFRESH_COMPLETED", { invoiceId: match.id, newStatus: reconciled.status, matched: reconciled.matched });
     json(res, 200, (await ctx.supabase.select<Record<string, any>>("invoices", { select: "*", id: `eq.${match.id}`, limit: "1" }))[0] ?? rows[0]);
     return true;
   }
@@ -128,8 +135,10 @@ export async function handleFinanceRoutes(
     let event: any;
     try { event = JSON.parse(new TextDecoder().decode(raw)); } catch { throw statusError(400, "Invalid PayPal webhook JSON"); }
     const eventId = requireString(event.id, "event.id", 200);
+    logEvent("info", "PAYPAL_WEBHOOK_RECEIVED", { eventId, eventType: event.event_type });
     const existing = await ctx.supabase.select<Record<string, any>>("webhook_events", { select: "paypal_event_id,verification_status", paypal_event_id: `eq.${eventId}`, limit: "1" });
     if (existing[0]?.verification_status === "SUCCESS") {
+      logEvent("info", "PAYPAL_WEBHOOK_ALREADY_VERIFIED", { eventId });
       json(res, 200, { received: true, duplicate: true });
       return true;
     }
@@ -145,7 +154,10 @@ export async function handleFinanceRoutes(
       ? await paypalForWorkspace(ctx, webhookWorkspaceId)
       : { gateway: ctx.paypal };
     const verified = await webhookPaypal.verifyWebhook(webhookHeaders, event);
-    if (!verified) throw statusError(400, "PayPal webhook signature verification failed");
+    if (!verified) {
+      logEvent("warn", "PAYPAL_WEBHOOK_VERIFICATION_FAILED", { eventId, eventType: event.event_type });
+      throw statusError(400, "PayPal webhook signature verification failed");
+    }
     const resourceId = typeof event?.resource?.id === "string" ? event.resource.id : typeof event?.resource?.payout_batch_id === "string" ? event.resource.payout_batch_id : null;
     const stored = await ctx.supabase.rpc<Record<string, any>>("royaltyos_store_verified_paypal_webhook", {
       p_workspace_id: webhookWorkspaceId,
@@ -157,6 +169,7 @@ export async function handleFinanceRoutes(
       p_raw_payload_hash: paypalWebhookPayloadHash(raw),
       p_correlation_id: requestId,
     });
+    logEvent("info", "PAYPAL_WEBHOOK_VERIFIED", { eventId, duplicate: Boolean(stored?.duplicate), queued: Boolean(stored?.queued) });
     json(res, 200, { received: true, duplicate: Boolean(stored?.duplicate), queued: Boolean(stored?.queued), processingStatus: stored?.processingStatus ?? "STORED" });
     return true;
   }
@@ -176,7 +189,10 @@ export async function handleFinanceRoutes(
     const revenue = (await ctx.supabase.select<Record<string, any>>("revenue_events", { select: "*", id: `eq.${revenueEventId}`, limit: "1" }))[0];
     if (!revenue) throw statusError(404, "Revenue event not found");
     const auth = await authorizeWorkspace(ctx, req, String(revenue.workspace_id), FINANCE_ROLES);
-    json(res, 200, await calculateAndCommitSettlement(ctx, { revenueEventId, actorId: auth.user.id }));
+    logEvent("info", "API_SETTLEMENT_CALCULATE_REQUEST", { revenueEventId, actorId: auth.user.id });
+    const result = await calculateAndCommitSettlement(ctx, { revenueEventId, actorId: auth.user.id });
+    logEvent("info", "API_SETTLEMENT_CALCULATE_COMPLETED", { revenueEventId, settlementId: result?.settlementId, lineCount: result?.result?.lines?.length ?? 0 });
+    json(res, 200, result);
     return true;
   }
 
@@ -191,8 +207,10 @@ export async function handleFinanceRoutes(
   match = routeMatch("/api/v1/settlements/:id/approve", path);
   if (match && method === "POST") {
     const auth = await authorizeByResource(ctx, req, "settlements", match.id!, FINANCE_ROLES, true);
+    logEvent("info", "API_SETTLEMENT_APPROVE_REQUEST", { settlementId: match.id, actorId: auth.user.id });
     await ctx.supabase.rpc("royaltyos_approve_settlement", { p_settlement_id: match.id, p_actor_id: auth.user.id });
     const row = (await ctx.supabase.select<Record<string, any>>("settlements", { select: "*", id: `eq.${match.id}`, limit: "1" }))[0];
+    logEvent("info", "API_SETTLEMENT_APPROVED", { settlementId: match.id, status: row?.status });
     json(res, 200, row);
     return true;
   }
@@ -202,8 +220,10 @@ export async function handleFinanceRoutes(
     // Voids a stale proposal so the revenue can be recalculated fresh.
     // Only unapproved settlements can be voided; voided rows stay visible.
     const auth = await authorizeByResource(ctx, req, "settlements", match.id!, FINANCE_ROLES, true);
+    logEvent("info", "API_SETTLEMENT_VOID_REQUEST", { settlementId: match.id, actorId: auth.user.id });
     await ctx.supabase.rpc("royaltyos_void_settlement", { p_settlement_id: match.id, p_actor_id: auth.user.id });
     const row = (await ctx.supabase.select<Record<string, any>>("settlements", { select: "*", id: `eq.${match.id}`, limit: "1" }))[0];
+    logEvent("info", "API_SETTLEMENT_VOIDED", { settlementId: match.id, status: row?.status });
     json(res, 200, row);
     return true;
   }
@@ -215,6 +235,7 @@ export async function handleFinanceRoutes(
     if (!settlement) throw statusError(404, "Settlement not found");
     const payableLines = await ctx.supabase.select<Record<string, any>>("settlement_lines", { select: "id", settlement_id: `eq.${match.id}`, payable_minor: "gt.0", limit: "1" });
     if (!payableLines.length) throw statusError(409, "Settlement has no payable lines: fully absorbed by recoupment or reserve, nothing to send");
+    logEvent("info", "API_PAYOUT_EXECUTE_REQUEST", { settlementId: match.id, actorId: auth.user.id });
     const existingBatches = await ctx.supabase.select<Record<string, any>>("payout_batches", { select: "*", settlement_id: `eq.${match.id}`, order: "payout_version.desc", limit: "1" });
     const latest = existingBatches[0];
     const version = latest ? Number(latest.payout_version) : 1;
@@ -233,6 +254,7 @@ export async function handleFinanceRoutes(
     const paypalBatchId = paypal?.batch_header?.payout_batch_id;
     if (typeof paypalBatchId !== "string") throw new Error("PayPal payout did not return batch id");
     await ctx.supabase.rpc("royaltyos_mark_payout_submitted", { p_batch_id: batch.id, p_paypal_batch_id: paypalBatchId, p_correlation_id: payoutRequestId });
+    logEvent("info", "API_PAYOUT_SUBMITTED", { settlementId: match.id, batchId: batch.id, paypalBatchId });
     json(res, 200, { ...batch, status: "SUBMITTED", paypal_batch_id: paypalBatchId });
     return true;
   }
@@ -240,6 +262,7 @@ export async function handleFinanceRoutes(
   match = routeMatch("/api/v1/settlements/:id/retry-payout", path);
   if (match && method === "POST") {
     const auth = await authorizeByResource(ctx, req, "settlements", match.id!, FINANCE_ROLES, true);
+    logEvent("info", "API_PAYOUT_RETRY_REQUEST", { settlementId: match.id, actorId: auth.user.id });
     const latest = (await ctx.supabase.select<Record<string, any>>("payout_batches", { select: "*", settlement_id: `eq.${match.id}`, order: "payout_version.desc", limit: "1" }))[0];
     if (!latest) throw statusError(409, "No prior payout batch");
     const nextVersion = Number(latest.payout_version) + 1;
@@ -252,6 +275,7 @@ export async function handleFinanceRoutes(
     const paypalBatchId = paypal?.batch_header?.payout_batch_id;
     if (typeof paypalBatchId !== "string") throw new Error("PayPal payout did not return batch id");
     await ctx.supabase.rpc("royaltyos_mark_payout_submitted", { p_batch_id: batch.id, p_paypal_batch_id: paypalBatchId });
+    logEvent("info", "API_PAYOUT_RETRY_SUBMITTED", { settlementId: match.id, batchId: batch.id, paypalBatchId });
     json(res, 200, { ...batch, status: "SUBMITTED", paypal_batch_id: paypalBatchId });
     return true;
   }

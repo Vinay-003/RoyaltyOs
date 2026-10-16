@@ -19,6 +19,7 @@ import {
 } from "../services.ts";
 import { calculateSettlement } from "../../../packages/core/settlement-engine.ts";
 import { ALL_READ_ROLES, CONTRACT_ROLES, FINANCE_ROLES, enforceRateLimit, workspaceFromProject } from "./helpers.ts";
+import { logEvent } from "../logger.ts";
 
 export async function handleContractRoutes(
   ctx: AppContext,
@@ -68,7 +69,9 @@ export async function handleContractRoutes(
     await enforceRateLimit(ctx, `contract-ai:${auth.user.id}`, 10, 3600);
     const body = await readJson(req);
     const versionId = requireString(body.versionId, "versionId", 100);
+    logEvent("info", "API_ANALYZE_REQUEST", { contractId: match.id, versionId, userId: auth.user.id });
     const result = await analyzeContractVersion(ctx, { workspaceId: auth.workspaceId, contractId: match.id!, versionId, actorId: auth.user.id });
+    logEvent("info", "API_ANALYZE_COMPLETED", { contractId: match.id, versionId, candidateCount: result?.candidates?.length ?? 0 });
     json(res, 200, result);
     return true;
   }

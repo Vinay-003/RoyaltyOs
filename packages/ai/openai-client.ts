@@ -17,9 +17,16 @@ export async function openaiFetch(
   init: RequestInit,
 ): Promise<Response> {
   const keys = config.ai.openaiApiKeys.filter((key) => typeof key === "string" && key);
-  if (!keys.length) throw new Error("No OpenAI API key is configured");
+  if (!keys.length) {
+    console.error("[RoyaltyOS] [ERROR] OPENAI_CONFIG_ERROR No OpenAI API key configured");
+    throw new Error("No OpenAI API key is configured");
+  }
   let lastStatus = 0;
-  for (const key of keys) {
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i]!;
+    const maskedKey = `${key.slice(0, 7)}...${key.slice(-4)}`;
+    const startTime = Date.now();
+    console.log(`[RoyaltyOS] [INFO] OPENAI_REQUEST_START url=${url} keyIndex=${i} key=${maskedKey}`);
     const headers = { ...(init.headers as Record<string, string> | undefined), Authorization: `Bearer ${key}` };
     const response = await fetchWithRetry(
       fetchImpl,
@@ -32,9 +39,22 @@ export async function openaiFetch(
         retryStatuses: [500, 502, 503, 504],
       },
     );
-    if (response.status !== 401 && response.status !== 402 && response.status !== 429) return response;
+    const durationMs = Date.now() - startTime;
+    console.log(`[RoyaltyOS] [INFO] OPENAI_REQUEST_RESPONSE status=${response.status} durationMs=${durationMs} ok=${response.ok}`);
+    if (response.status !== 401 && response.status !== 402 && response.status !== 429) {
+      if (!response.ok) {
+        try {
+          const clone = response.clone();
+          const errText = await clone.text();
+          console.error(`[RoyaltyOS] [ERROR] OPENAI_REQUEST_REJECTED status=${response.status} body=${errText}`);
+        } catch { /* ignore clone failure */ }
+      }
+      return response;
+    }
     lastStatus = response.status;
+    console.warn(`[RoyaltyOS] [WARN] OPENAI_KEY_ROTATING status=${response.status} keyIndex=${i} (trying next key if available)`);
     try { await response.arrayBuffer(); } catch { /* consume best effort */ }
   }
+  console.error(`[RoyaltyOS] [ERROR] OPENAI_ALL_KEYS_EXHAUSTED tried=${keys.length} lastStatus=${lastStatus}`);
   throw new Error(`OpenAI request rejected on all ${keys.length} API keys (last status ${lastStatus})`);
 }

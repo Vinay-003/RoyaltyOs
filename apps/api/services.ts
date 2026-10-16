@@ -10,6 +10,7 @@ import { decryptSecret } from "../../packages/security/paypal-vault.ts";
 import { PayPalGateway } from "../../packages/paypal/gateway.ts";
 import type { AppContext } from "./context.ts";
 import { statusError } from "./http.ts";
+import { logEvent } from "./logger.ts";
 
 /**
  * Resolves the PayPal gateway for a workspace: the workspace's own connected
@@ -210,6 +211,7 @@ export async function analyzeContractVersion(
   ctx: AppContext,
   input: { workspaceId: string; contractId: string; versionId: string; actorId: string },
 ) {
+  logEvent("info", "ANALYZE_CONTRACT_VERSION_START", { contractId: input.contractId, versionId: input.versionId, actorId: input.actorId });
   const version = (await ctx.supabase.select<Record<string, any>>("contract_versions", {
     select: "id,contract_id,workspace_id,version,title",
     id: `eq.${input.versionId}`,
@@ -217,14 +219,28 @@ export async function analyzeContractVersion(
     workspace_id: `eq.${input.workspaceId}`,
     limit: "1",
   }))[0];
-  if (!version) throw statusError(404, "Contract version not found");
+  if (!version) {
+    logEvent("error", "ANALYZE_CONTRACT_VERSION_NOT_FOUND", { contractId: input.contractId, versionId: input.versionId });
+    throw statusError(404, "Contract version not found");
+  }
   const document = (await ctx.supabase.select<Record<string, any>>("contract_documents", {
     select: "bucket,object_path,original_filename,file_size_bytes,page_count,sha256",
     contract_version_id: `eq.${input.versionId}`,
     limit: "1",
   }))[0];
-  if (!document) throw statusError(409, "Contract version has no validated document");
+  if (!document) {
+    logEvent("error", "ANALYZE_DOCUMENT_NOT_FOUND", { contractId: input.contractId, versionId: input.versionId });
+    throw statusError(409, "Contract version has no validated document");
+  }
+  logEvent("info", "DOWNLOADING_CONTRACT_DOCUMENT", {
+    bucket: document.bucket,
+    objectPath: document.object_path,
+    filename: document.original_filename,
+    fileSizeBytes: document.file_size_bytes,
+    pageCount: document.page_count,
+  });
   const bytes = await ctx.supabase.downloadPrivateObject(String(document.bucket), String(document.object_path));
+  logEvent("info", "CONTRACT_DOCUMENT_DOWNLOADED", { filename: document.original_filename, bytesLength: bytes.length });
 
   const priorVersionRows = await ctx.supabase.select<Record<string, any>>("contract_versions", {
     select: "id,version",
@@ -251,12 +267,38 @@ export async function analyzeContractVersion(
   }
 
   const extractor = ctx.config.ai.extractionMode === "vision" ? extractContractWithVision : extractContractWithOpenAI;
-  const result = await extractor(ctx.config, {
-    filename: String(document.original_filename),
-    bytes,
-    documentVersion: Number(version.version),
-    priorDocuments,
-  }, ctx.fetchImpl);
+  logEvent("info", "INVOKING_AI_EXTRACTOR", {
+    provider: ctx.config.ai.provider,
+    model: ctx.config.ai.model,
+    mode: ctx.config.ai.extractionMode,
+    filename: document.original_filename,
+    priorDocumentsCount: priorDocuments.length,
+  });
+  const aiStartTime = Date.now();
+  let result;
+  try {
+    result = await extractor(ctx.config, {
+      filename: String(document.original_filename),
+      bytes,
+      documentVersion: Number(version.version),
+      priorDocuments,
+    }, ctx.fetchImpl);
+    logEvent("info", "AI_EXTRACTOR_SUCCESS", {
+      model: result.model,
+      durationMs: Date.now() - aiStartTime,
+      rulesCount: result.extraction?.rules?.length ?? 0,
+      partiesCount: result.extraction?.parties?.length ?? 0,
+      warningsCount: result.extraction?.warnings?.length ?? 0,
+      conflictsCount: result.extraction?.conflicts?.length ?? 0,
+    });
+  } catch (error) {
+    logEvent("error", "AI_EXTRACTOR_FAILED", {
+      durationMs: Date.now() - aiStartTime,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    throw error;
+  }
   const analysisRows = await ctx.supabase.insert<Record<string, any>>("contract_analyses", {
     workspace_id: input.workspaceId,
     contract_version_id: input.versionId,
@@ -298,17 +340,14 @@ export async function analyzeContractVersion(
       status: r.status,
     })), false);
   }
-  console.info(JSON.stringify({
-    level: "info",
-    message: "AI contract extraction finished",
+  logEvent("info", "CANDIDATE_RULES_STORED", {
     contractId: input.contractId,
     versionId: input.versionId,
     model: result.model,
-    mode: ctx.config.ai.extractionMode,
-    candidates: candidates.length,
-    warnings: result.extraction.warnings.length,
-    conflicts: result.extraction.conflicts.length,
-  }));
+    candidatesCount: candidates.length,
+    warningsCount: result.extraction.warnings.length,
+    conflictsCount: result.extraction.conflicts.length,
+  });
   await ctx.supabase.update("contracts", { status: "REVIEW_REQUIRED" }, { id: `eq.${input.contractId}` }, false);
   await ctx.supabase.rpc("royaltyos_append_audit", {
     p_workspace_id: input.workspaceId,
