@@ -10,6 +10,9 @@ export const RULE_TYPES = [
   "THRESHOLD",
   "DATE_RANGE",
   "REVENUE_CATEGORY",
+  "TIERED_CUMULATIVE",
+  "DERIVATIVE_SPLIT",
+  "COMPOSITE_CONDITION",
 ] as const;
 
 export type RuleType = (typeof RULE_TYPES)[number];
@@ -21,11 +24,34 @@ export type WorkspaceRole =
   | "CONTRIBUTOR"
   | "AUDITOR";
 
+export type TierDefinition = {
+  tierIndex: number;
+  thresholdMinor: number | null; // null = infinity (final tier)
+  rateBasisPoints: number;
+  label?: string | null;
+};
+
+export type TieredCumulativeConfig = {
+  beneficiaryKey: string;
+  basis?: "GROSS_REVENUE" | "NET_REVENUE" | "BENEFICIARY_EARNINGS";
+  tiers: TierDefinition[];
+  mode?: "MARGINAL" | "RETROACTIVE";
+  resetPeriod?: "NEVER" | "ANNUAL" | "QUARTERLY" | "MONTHLY";
+};
+
+export type CumulativeState = {
+  ruleId: string;
+  beneficiaryKey: string;
+  cumulativeRevenueMinor: number;
+  cumulativeEarningsMinor: number;
+  periodAnchor?: string | null;
+};
+
 export type CandidateRule = {
   id: string;
   type: RuleType | "UNSUPPORTED";
   beneficiaryKey: string | null;
-  base: "GROSS_REVENUE" | "NET_REVENUE" | "REMAINDER";
+  base: "GROSS_REVENUE" | "NET_REVENUE" | "REMAINDER" | "PARENT_RULE";
   rateBasisPoints: number | null;
   fixedMinor: number | null;
   priority: number;
@@ -43,7 +69,9 @@ export type RuleCondition = {
     | "currency"
     | "occurred_at"
     | "recoupment_remaining"
-    | "revenue_minor";
+    | "revenue_minor"
+    | "cumulative_earnings_minor"
+    | "cumulative_revenue_minor";
   operator: "EQ" | "NEQ" | "GT" | "GTE" | "LT" | "LTE" | "IN" | "BETWEEN";
   value: string | number | Array<string | number>;
 };
@@ -61,7 +89,7 @@ export type ExecutableRule = {
   id: string;
   type: RuleType;
   beneficiaryKey: string | null;
-  base: "GROSS_REVENUE" | "NET_REVENUE" | "REMAINDER";
+  base: "GROSS_REVENUE" | "NET_REVENUE" | "REMAINDER" | "PARENT_RULE";
   rateBasisPoints: number | null;
   fixedMinor: number | null;
   priority: number;
@@ -101,5 +129,11 @@ export type SettlementResult = {
   totalMinor: number;
   lines: SettlementLine[];
   recoupmentDeltas: Array<{ ruleId: string; appliedMinor: number }>;
+  cumulativeDeltas?: Array<{
+    ruleId: string;
+    beneficiaryKey: string;
+    appliedEarningsMinor: number;
+    appliedRevenueMinor: number;
+  }>;
   explanation: string[];
 };

@@ -1,5 +1,6 @@
-import { allocateLargestRemainder, assertMinorUnits } from "./money.ts";
+import { allocateLargestRemainder, allocateTieredTranches, assertMinorUnits } from "./money.ts";
 import type {
+  CumulativeState,
   ExecutableRule,
   RecoupmentState,
   RevenueContext,
@@ -42,6 +43,7 @@ function ruleMatches(
   rule: ExecutableRule,
   ctx: RevenueContext,
   recoupmentRemaining: number,
+  cumulativeState?: CumulativeState | null,
 ): boolean {
   const configuredCategory = stringConfig(rule, "category");
   if (configuredCategory && configuredCategory.toUpperCase() !== (ctx.category ?? "").toUpperCase()) return false;
@@ -60,6 +62,8 @@ function ruleMatches(
     if (condition.field === "occurred_at") actual = occurred;
     if (condition.field === "recoupment_remaining") actual = recoupmentRemaining;
     if (condition.field === "revenue_minor") actual = ctx.revenueMinor;
+    if (condition.field === "cumulative_earnings_minor") actual = cumulativeState?.cumulativeEarningsMinor ?? 0;
+    if (condition.field === "cumulative_revenue_minor") actual = cumulativeState?.cumulativeRevenueMinor ?? 0;
     if (!compareCondition(actual, condition)) return false;
   }
   return true;
@@ -74,12 +78,13 @@ function ruleMatchesWithDateModifiers(
   allRules: ExecutableRule[],
   ctx: RevenueContext,
   recoupmentRemaining: number,
+  cumulativeState?: CumulativeState | null,
 ) {
-  if (!ruleMatches(rule, ctx, recoupmentRemaining)) return false;
+  if (!ruleMatches(rule, ctx, recoupmentRemaining, cumulativeState)) return false;
   for (const modifier of allRules.filter((candidate) =>
     candidate.type === "DATE_RANGE" && modifierTarget(candidate) === rule.id
   )) {
-    if (!ruleMatches(modifier, ctx, recoupmentRemaining)) return false;
+    if (!ruleMatches(modifier, ctx, recoupmentRemaining, cumulativeState)) return false;
   }
   return true;
 }
@@ -125,13 +130,22 @@ export function calculateSettlement(
   ctx: RevenueContext,
   rules: ExecutableRule[],
   recoupments: RecoupmentState[],
+  cumulatives: CumulativeState[] = [],
 ): SettlementResult {
   assertMinorUnits(ctx.revenueMinor, "revenueMinor");
   const sorted = [...rules].sort((a, b) => effectivePriority(a, rules) - effectivePriority(b, rules) || a.id.localeCompare(b.id));
   const recByRule = new Map(recoupments.map((r) => [r.ruleId, { ...r }]));
+  const cumByRule = new Map(cumulatives.map((c) => [c.ruleId, { ...c }]));
+  const cumByBeneficiary = new Map(cumulatives.map((c) => [c.beneficiaryKey, { ...c }]));
   const explanation: string[] = [];
   const lines: SettlementLine[] = [];
   const recoupmentDeltas: Array<{ ruleId: string; appliedMinor: number }> = [];
+  const cumulativeDeltas: Array<{
+    ruleId: string;
+    beneficiaryKey: string;
+    appliedEarningsMinor: number;
+    appliedRevenueMinor: number;
+  }> = [];
   let remaining = ctx.revenueMinor;
 
   // 1) Contractual exclusions/deductions.
@@ -205,6 +219,62 @@ export function calculateSettlement(
       metadata: { requestedMinor: requested },
     });
     explanation.push(`Allocated fixed amount ${amount} under ${rule.id}.`);
+  }
+
+  // 3.5) Tiered cumulative allocations.
+  for (const rule of sorted.filter((r) => r.type === "TIERED_CUMULATIVE")) {
+    let cumState = cumByRule.get(rule.id) ?? (rule.beneficiaryKey ? cumByBeneficiary.get(rule.beneficiaryKey) : null);
+    if (!cumState && rule.beneficiaryKey) {
+      cumState = {
+        ruleId: rule.id,
+        beneficiaryKey: rule.beneficiaryKey,
+        cumulativeRevenueMinor: 0,
+        cumulativeEarningsMinor: 0,
+        periodAnchor: null,
+      };
+      cumByRule.set(rule.id, cumState);
+      cumByBeneficiary.set(rule.beneficiaryKey, cumState);
+    }
+    if (!ruleMatchesWithDateModifiers(rule, rules, ctx, 0, cumState)) continue;
+    const tiers = Array.isArray(rule.config.tiers) ? (rule.config.tiers as any[]) : [];
+    if (!tiers.length) continue;
+
+    const basisConfig = stringConfig(rule, "cumulativeBasis") ?? stringConfig(rule, "basis") ?? "BENEFICIARY_EARNINGS";
+    const trancheBasis = (basisConfig === "GROSS_REVENUE" || basisConfig === "REVENUE") ? "REVENUE" : "EARNINGS";
+    const prior = trancheBasis === "EARNINGS" ? (cumState?.cumulativeEarningsMinor ?? 0) : (cumState?.cumulativeRevenueMinor ?? 0);
+    const baseMinor = rule.base === "GROSS_REVENUE" ? ctx.revenueMinor : remaining;
+    const tranches = allocateTieredTranches(baseMinor, prior, tiers, trancheBasis);
+    const totalAllocated = tranches.reduce((sum, t) => sum + t.allocatedMinor, 0);
+
+    const payable = Math.min(remaining, totalAllocated);
+    if (payable > 0 || totalAllocated === 0) {
+      remaining -= payable;
+      lines.push({
+        key: `tiered:${rule.id}`,
+        beneficiaryKey: rule.beneficiaryKey ?? "tiered",
+        ruleId: rule.id,
+        amountMinor: payable,
+        payableMinor: payable,
+        kind: "PAYABLE",
+        metadata: {
+          ruleType: "TIERED_CUMULATIVE",
+          tranches,
+          priorCumulativeMinor: prior,
+          basis: basisConfig,
+        },
+      });
+      if (cumState) {
+        cumState.cumulativeEarningsMinor += payable;
+        cumState.cumulativeRevenueMinor += baseMinor;
+      }
+      cumulativeDeltas.push({
+        ruleId: rule.id,
+        beneficiaryKey: rule.beneficiaryKey ?? "tiered",
+        appliedEarningsMinor: payable,
+        appliedRevenueMinor: baseMinor,
+      });
+      explanation.push(`Allocated ${payable} minor units under tiered rule ${rule.id} across ${tranches.length} tranche(s).`);
+    }
   }
 
   // 4) Percentage allocations. GROSS_REVENUE rules are calculated against the
@@ -311,6 +381,30 @@ export function calculateSettlement(
     });
   }
 
+  // 5) Derivative splits carved out of parent rules.
+  for (const rule of sorted.filter((r) => r.type === "DERIVATIVE_SPLIT" || r.base === "PARENT_RULE")) {
+    const parentId = stringConfig(rule, "parentRuleId");
+    const parentLine = lines.find((l) => l.ruleId === parentId);
+    if (parentLine && parentLine.amountMinor > 0) {
+      const bps = rule.rateBasisPoints ?? 0;
+      const childShare = Math.floor((parentLine.amountMinor * bps) / 10000);
+      if (childShare > 0) {
+        parentLine.amountMinor -= childShare;
+        parentLine.payableMinor = Math.min(parentLine.payableMinor, parentLine.amountMinor);
+        lines.push({
+          key: `derivative:${rule.id}`,
+          beneficiaryKey: rule.beneficiaryKey ?? "derivative",
+          ruleId: rule.id,
+          amountMinor: childShare,
+          payableMinor: childShare,
+          kind: "PAYABLE",
+          metadata: { parentRuleId: parentId, rateBasisPoints: bps },
+        });
+        explanation.push(`Carved derivative split ${rule.id} (${childShare} minor units) from parent rule ${parentId}.`);
+      }
+    }
+  }
+
   const total = lines.reduce((s, line) => s + line.amountMinor, 0);
   if (total !== ctx.revenueMinor) {
     throw new Error(`Settlement invariant failed: ${total} != ${ctx.revenueMinor}`);
@@ -320,5 +414,5 @@ export function calculateSettlement(
   }
 
   explanation.push(`Settlement reconciles exactly to ${ctx.revenueMinor} minor units.`);
-  return { totalMinor: ctx.revenueMinor, lines, recoupmentDeltas, explanation };
+  return { totalMinor: ctx.revenueMinor, lines, recoupmentDeltas, cumulativeDeltas, explanation };
 }

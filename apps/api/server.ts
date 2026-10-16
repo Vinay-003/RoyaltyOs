@@ -99,6 +99,14 @@ export function startRoyaltyServer(ctx: AppContext = createAppContext()) {
 const entry = process.argv[1] ? path.resolve(process.argv[1]) : "";
 const self = fileURLToPath(import.meta.url);
 if (entry && path.resolve(self) === entry) {
+  process.on("uncaughtException", (err) => {
+    console.error(JSON.stringify({ level: "error", message: "Uncaught exception", error: err?.message, stack: err?.stack }));
+    process.exit(1);
+  });
+  process.on("unhandledRejection", (reason) => {
+    console.error(JSON.stringify({ level: "error", message: "Unhandled promise rejection", reason: String(reason) }));
+  });
+
   // SKIP_BOOT_MIGRATIONS=true is an explicit local-preview escape hatch (e.g.
   // DB unreachable, landing-page-only work). Production stays fail-closed:
   // without the flag, a migration failure still refuses to serve.

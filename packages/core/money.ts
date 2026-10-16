@@ -46,3 +46,88 @@ export function allocateLargestRemainder(
     amountMinor: row.floored + (bonus.get(row.key) ?? 0),
   }));
 }
+
+export type TrancheAllocation = {
+  tierIndex: number;
+  rateBasisPoints: number;
+  applicableRevenueMinor: number;
+  allocatedMinor: number;
+  label: string | null;
+};
+
+export function allocateTieredTranches(
+  eventRevenueMinor: number,
+  priorCumulativeMinor: number,
+  tiers: Array<{ tierIndex: number; thresholdMinor: number | null; rateBasisPoints: number; label?: string | null }>,
+  basis: "REVENUE" | "EARNINGS" = "REVENUE",
+): TrancheAllocation[] {
+  assertMinorUnits(eventRevenueMinor, "eventRevenueMinor");
+  assertMinorUnits(priorCumulativeMinor, "priorCumulativeMinor");
+  if (!tiers.length || eventRevenueMinor <= 0) return [];
+
+  const sortedTiers = [...tiers].sort((a, b) => {
+    if (a.thresholdMinor === null) return 1;
+    if (b.thresholdMinor === null) return -1;
+    return a.thresholdMinor - b.thresholdMinor;
+  });
+
+  let remainingRevenue = eventRevenueMinor;
+  let currentCumulative = priorCumulativeMinor;
+  const allocations: TrancheAllocation[] = [];
+
+  for (const tier of sortedTiers) {
+    if (remainingRevenue <= 0) break;
+    const ceiling = tier.thresholdMinor ?? Number.MAX_SAFE_INTEGER;
+
+    if (currentCumulative >= ceiling) {
+      continue;
+    }
+
+    if (basis === "EARNINGS") {
+      const earningsCapacity = ceiling - currentCumulative;
+      if (tier.rateBasisPoints <= 0) {
+        allocations.push({
+          tierIndex: tier.tierIndex,
+          rateBasisPoints: 0,
+          applicableRevenueMinor: remainingRevenue,
+          allocatedMinor: 0,
+          label: tier.label ?? null,
+        });
+        remainingRevenue = 0;
+        break;
+      }
+      const revenueNeeded = Math.ceil((earningsCapacity * 10000) / tier.rateBasisPoints);
+      const applicable = Math.min(remainingRevenue, revenueNeeded);
+      const allocated = Math.min(earningsCapacity, Math.floor((applicable * tier.rateBasisPoints) / 10000));
+
+      allocations.push({
+        tierIndex: tier.tierIndex,
+        rateBasisPoints: tier.rateBasisPoints,
+        applicableRevenueMinor: applicable,
+        allocatedMinor: allocated,
+        label: tier.label ?? null,
+      });
+
+      remainingRevenue -= applicable;
+      currentCumulative += allocated;
+    } else {
+      const revenueCapacity = ceiling - currentCumulative;
+      const applicable = Math.min(remainingRevenue, revenueCapacity);
+      const allocated = Math.floor((applicable * tier.rateBasisPoints) / 10000);
+
+      allocations.push({
+        tierIndex: tier.tierIndex,
+        rateBasisPoints: tier.rateBasisPoints,
+        applicableRevenueMinor: applicable,
+        allocatedMinor: allocated,
+        label: tier.label ?? null,
+      });
+
+      remainingRevenue -= applicable;
+      currentCumulative += applicable;
+    }
+  }
+
+  return allocations;
+}
+

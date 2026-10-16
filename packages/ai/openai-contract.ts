@@ -29,7 +29,8 @@ export function extractAdvanceMinor(documentText: string): number | null {
 const MAX_EXTRACTION_CHARS = 120_000;
 
 const RULE_TYPES = [
-  "PERCENTAGE","FIXED_AMOUNT","RECOUPMENT","CAP","FLOOR","EXCLUSION","RESERVE","PRIORITY","THRESHOLD","DATE_RANGE","REVENUE_CATEGORY","UNSUPPORTED"
+  "PERCENTAGE","FIXED_AMOUNT","RECOUPMENT","CAP","FLOOR","EXCLUSION","RESERVE","PRIORITY","THRESHOLD","DATE_RANGE","REVENUE_CATEGORY",
+  "TIERED_CUMULATIVE","DERIVATIVE_SPLIT","COMPOSITE_CONDITION","UNSUPPORTED"
 ];
 
 export const contractSchema = {
@@ -61,7 +62,7 @@ export const contractSchema = {
           beneficiary_key: { anyOf: [{ type: "string" }, { type: "null" }] },
           source_version: { type: "integer", minimum: 1 },
           source_document: { type: "string" },
-          base: { type: "string", enum: ["GROSS_REVENUE","NET_REVENUE","REMAINDER"] },
+          base: { type: "string", enum: ["GROSS_REVENUE","NET_REVENUE","REMAINDER","PARENT_RULE"] },
           rate_basis_points: { anyOf: [{ type: "integer", minimum: 0, maximum: 10000 }, { type: "null" }] },
           fixed_minor: { anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }] },
           priority: { type: "integer", minimum: 0, maximum: 100000 },
@@ -72,7 +73,7 @@ export const contractSchema = {
               additionalProperties: false,
               required: ["field","operator","value"],
               properties: {
-                field: { type: "string", enum: ["revenue_category","currency","occurred_at","recoupment_remaining","revenue_minor"] },
+                field: { type: "string", enum: ["revenue_category","currency","occurred_at","recoupment_remaining","revenue_minor","cumulative_earnings_minor","cumulative_revenue_minor"] },
                 operator: { type: "string", enum: ["EQ","NEQ","GT","GTE","LT","LTE","IN","BETWEEN"] },
                 value: { anyOf: [
                   { type: "string" },
@@ -88,7 +89,8 @@ export const contractSchema = {
             required: [
               "advanceMinor","preRecoupmentBasisPoints","postRecoupmentBasisPoints","maxRecoupmentPerEventMinor",
               "category","currency","startDate","endDate","targetRuleId","amountMinor","capMinor","floorMinor",
-              "thresholdMinor","mode","priorityValue"
+              "thresholdMinor","mode","priorityValue",
+              "tiers","cumulativeBasis","tierMode","resetPeriod","parentRuleId"
             ],
             properties: {
               advanceMinor: { anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }] },
@@ -105,7 +107,47 @@ export const contractSchema = {
               floorMinor: { anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }] },
               thresholdMinor: { anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }] },
               mode: { anyOf: [{ type: "string", enum: ["MIN_REVENUE","MIN_PAYOUT"] }, { type: "null" }] },
-              priorityValue: { anyOf: [{ type: "integer", minimum: 0, maximum: 100000 }, { type: "null" }] }
+              priorityValue: { anyOf: [{ type: "integer", minimum: 0, maximum: 100000 }, { type: "null" }] },
+              tiers: {
+                anyOf: [
+                  {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["tierIndex", "thresholdMinor", "rateBasisPoints", "label"],
+                      properties: {
+                        tierIndex: { type: "integer", minimum: 0 },
+                        thresholdMinor: { anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }] },
+                        rateBasisPoints: { type: "integer", minimum: 0, maximum: 10000 },
+                        label: { anyOf: [{ type: "string" }, { type: "null" }] }
+                      }
+                    }
+                  },
+                  { type: "null" }
+                ]
+              },
+              cumulativeBasis: {
+                anyOf: [
+                  { type: "string", enum: ["GROSS_REVENUE", "NET_REVENUE", "BENEFICIARY_EARNINGS"] },
+                  { type: "null" }
+                ]
+              },
+              tierMode: {
+                anyOf: [
+                  { type: "string", enum: ["MARGINAL", "RETROACTIVE"] },
+                  { type: "null" }
+                ]
+              },
+              resetPeriod: {
+                anyOf: [
+                  { type: "string", enum: ["NEVER", "ANNUAL", "QUARTERLY", "MONTHLY"] },
+                  { type: "null" }
+                ]
+              },
+              parentRuleId: {
+                anyOf: [{ type: "string" }, { type: "null" }]
+              }
             }
           },
           dependencies: { type: "array", items: { type: "string" } },
