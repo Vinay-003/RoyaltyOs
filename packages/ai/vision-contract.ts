@@ -175,8 +175,17 @@ export function parseVisionJson(raw: unknown): Record<string, any> {
   let lastError: unknown = null;
   for (const attempt of attempts) {
     try {
-      const parsed = JSON.parse(attempt) as Record<string, any>;
-      if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as { rules?: unknown }).rules)) {
+      let parsed = JSON.parse(attempt) as any;
+      if (Array.isArray(parsed)) {
+        parsed = { rules: parsed };
+      } else if (parsed && typeof parsed === "object" && !Array.isArray(parsed.rules)) {
+        if (Array.isArray(parsed.contract?.rules)) parsed.rules = parsed.contract.rules;
+        else if (Array.isArray(parsed.extraction?.rules)) parsed.rules = parsed.extraction.rules;
+        else if (Array.isArray(parsed.data?.rules)) parsed.rules = parsed.data.rules;
+        else if (Array.isArray(parsed.financial_rules)) parsed.rules = parsed.financial_rules;
+        else if (Array.isArray(parsed.terms)) parsed.rules = parsed.terms;
+      }
+      if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.rules)) {
         throw new Error("reply has no rules array");
       }
       return parsed;
