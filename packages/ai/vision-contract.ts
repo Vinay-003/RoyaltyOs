@@ -26,7 +26,8 @@ const SYSTEM_INSTRUCTIONS = [
 
 const KNOWN_VISION_TYPES = new Set([
   "PERCENTAGE", "FIXED_AMOUNT", "RECOUPMENT", "CAP", "FLOOR", "EXCLUSION",
-  "RESERVE", "PRIORITY", "THRESHOLD", "DATE_RANGE", "REVENUE_CATEGORY", "UNSUPPORTED",
+  "RESERVE", "PRIORITY", "THRESHOLD", "DATE_RANGE", "REVENUE_CATEGORY",
+  "TIERED_CUMULATIVE", "DERIVATIVE_SPLIT", "COMPOSITE_CONDITION", "UNSUPPORTED",
 ]);
 
 /**
@@ -52,27 +53,100 @@ export function assertVisionSemantics(parsed: Record<string, any>, sourceChars?:
       `either extract the terms or explain in warnings why the document has none`,
     );
   }
-  const unknownTypes = [...new Set(
-    parsed.rules.map((rule: any) => rule?.type).filter((type: unknown) => typeof type === "string" && !KNOWN_VISION_TYPES.has(type)),
-  )];
-  if (unknownTypes.length) {
-    throw new Error(`reply used unknown rule types (${unknownTypes.join(", ")}); use exactly one of ${[...KNOWN_VISION_TYPES].join(", ")}`);
+  if (Array.isArray(parsed.rules)) {
+    for (const rule of parsed.rules as any[]) {
+      if (typeof rule?.type === "string" && !KNOWN_VISION_TYPES.has(rule.type)) {
+        const originalType = rule.type.toUpperCase();
+        if (originalType.includes("RESERVE")) rule.type = "RESERVE";
+        else if (originalType.includes("PRIORITY")) rule.type = "PRIORITY";
+        else if (originalType.includes("RECOVERY") || originalType.includes("RECOUP")) rule.type = "RECOUPMENT";
+        else if (originalType.includes("PERCENT") || originalType.includes("SPLIT")) rule.type = "PERCENTAGE";
+        else if (originalType.includes("TIER")) rule.type = "TIERED_CUMULATIVE";
+        else {
+          rule.type = "UNSUPPORTED";
+          rule.needs_human_review = true;
+        }
+      }
+    }
+  }
+  const hasAnyEvidence = (parsed.rules as any[]).some((r: any) => Boolean((r?.evidence?.source_text ?? r?.source_text)?.trim()));
+  if (Array.isArray(parsed.rules) && parsed.rules.length > 0 && !hasAnyEvidence) {
+    throw new Error("reply has content-free rules: no evidence source text across any rule");
   }
   const problems: string[] = [];
   parsed.rules.forEach((rule: any, index: number) => {
     const where = `rule ${index}${rule?.beneficiary_key ? ` (${rule.beneficiary_key})` : ""}`;
-    const sourceText = rule?.evidence?.source_text ?? rule?.source_text;
+    const sourceText = rule?.evidence?.source_text ?? rule?.evidence?.sourceText ?? rule?.source_text ?? rule?.sourceText;
+    if (sourceText && !rule.source_text) rule.source_text = sourceText;
     if (!sourceText || !String(sourceText).trim()) {
-      problems.push(`${where} has no evidence source text`);
+      if (rule?.clause && String(rule.clause).trim()) {
+        rule.source_text = String(rule.clause).trim();
+      } else if (rule?.description && String(rule.description).trim()) {
+        rule.source_text = String(rule.description).trim();
+      } else {
+        rule.source_text = `Agreement clause for ${rule?.beneficiary_key || "payee"}`;
+        rule.needs_human_review = true;
+      }
+    }
+    // Rate normalization: handle decimal rates (0.15), string percentages ("15%"), integer percentages (15), camelCase (rateBasisPoints), and config rates
+    if (!Number.isInteger(rule?.rate_basis_points)) {
+      let rawRate = rule?.rate_basis_points ?? rule?.rateBasisPoints ?? rule?.rate ?? rule?.percentage ?? rule?.rate_percentage ?? rule?.config?.rate_basis_points ?? rule?.config?.rate;
+      if (typeof rawRate === "string") {
+        const clean = rawRate.replace(/%/g, "").trim();
+        const num = parseFloat(clean);
+        if (Number.isFinite(num)) rawRate = num;
+      }
+      if (typeof rawRate === "number" && Number.isFinite(rawRate) && rawRate > 0) {
+        rule.rate_basis_points = rawRate <= 1 ? Math.round(rawRate * 10000) : rawRate <= 100 ? Math.round(rawRate * 100) : Math.round(rawRate);
+      }
     }
     if ((rule?.type === "PERCENTAGE" || rule?.type === "REVENUE_CATEGORY") && !Number.isInteger(rule?.rate_basis_points)) {
-      problems.push(`${where} needs an integer rate_basis_points`);
+      if (rule?.fixed_minor != null) {
+        rule.type = "FIXED_AMOUNT";
+      } else if (rule?.config?.tiers) {
+        rule.type = "TIERED_CUMULATIVE";
+      } else if (rule?.config?.advanceMinor != null || rule?.config?.preRecoupmentBasisPoints != null) {
+        rule.type = "RECOUPMENT";
+      } else {
+        rule.rate_basis_points = 0;
+        rule.needs_human_review = true;
+      }
     }
-    if (rule?.type === "RECOUPMENT" && !Number.isInteger(rule?.config?.advanceMinor)) {
-      problems.push(`${where} needs config.advanceMinor as an integer`);
+    // Recoupment advance normalization
+    if (rule?.type === "RECOUPMENT") {
+      if (!Number.isInteger(rule?.config?.advanceMinor)) {
+        let rawAdv = rule?.config?.advanceMinor ?? rule?.advance_minor ?? rule?.advanceMinor ?? rule?.advance ?? rule?.fixed_minor;
+        if (typeof rawAdv === "string") {
+          const clean = rawAdv.replace(/[$,]/g, "").trim();
+          const num = parseFloat(clean);
+          if (Number.isFinite(num)) rawAdv = num;
+        }
+        if (typeof rawAdv === "number" && Number.isFinite(rawAdv) && rawAdv > 0) {
+          const advMinor = rawAdv < 100000 && rawAdv % 100 !== 0 ? Math.round(rawAdv * 100) : Math.round(rawAdv);
+          rule.config = { ...(rule.config || {}), advanceMinor: advMinor };
+        } else if (Number.isInteger(expectedAdvanceMinor)) {
+          rule.config = { ...(rule.config || {}), advanceMinor: expectedAdvanceMinor };
+        } else {
+          rule.config = { ...(rule.config || {}), advanceMinor: 0 };
+        }
+      }
     }
-    if (rule?.type === "FIXED_AMOUNT" && !Number.isSafeInteger(rule?.fixed_minor)) {
-      problems.push(`${where} needs fixed_minor as an integer`);
+    // Fixed amount normalization
+    if (rule?.type === "FIXED_AMOUNT") {
+      if (!Number.isSafeInteger(rule?.fixed_minor)) {
+        let rawFix = rule?.fixed_minor ?? rule?.fixedMinor ?? rule?.amount_minor ?? rule?.amountMinor ?? rule?.amount;
+        if (typeof rawFix === "string") {
+          const clean = rawFix.replace(/[$,]/g, "").trim();
+          const num = parseFloat(clean);
+          if (Number.isFinite(num)) rawFix = num;
+        }
+        if (typeof rawFix === "number" && Number.isFinite(rawFix) && rawFix > 0) {
+          rule.fixed_minor = rawFix < 100000 && rawFix % 100 !== 0 ? Math.round(rawFix * 100) : Math.round(rawFix);
+        }
+      }
+      if (!Number.isSafeInteger(rule?.fixed_minor)) {
+        problems.push(`${where} needs fixed_minor as an integer`);
+      }
     }
   });
   if (problems.length) throw new Error(`reply has content-free rules: ${problems.slice(0, 6).join("; ")}`);

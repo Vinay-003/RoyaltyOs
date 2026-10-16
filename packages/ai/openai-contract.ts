@@ -179,6 +179,7 @@ export const contractSchema = {
 
 function outputText(payload: any): string {
   if (typeof payload?.output_text === "string") return payload.output_text;
+  if (typeof payload?.choices?.[0]?.message?.content === "string") return payload.choices[0].message.content;
   const pieces: string[] = [];
   for (const item of payload?.output ?? []) {
     for (const content of item?.content ?? []) {
@@ -266,49 +267,145 @@ export async function extractContractWithOpenAI(
     "For recoupment rules, put advanceMinor, preRecoupmentBasisPoints and postRecoupmentBasisPoints into config when present.",
     "For category rules, put category into config. For caps/floors/thresholds, put targetRuleId/amountMinor fields into config when inferable.",
     "For DATE_RANGE and PRIORITY modifiers, use targetRuleId only when the target is unambiguous; otherwise keep the financial rule itself review-required. Use priorityValue for an explicit contractual priority number.",
+    "Format rates as rate_basis_points (integer, percentage * 100), money as fixed_minor (integer minor units), and provide verbatim quote in source_text for every rule.",
   ].join(" ");
-  const call = (repairNote?: string) => openaiFetch(config, fetchImpl, `${config.ai.baseUrl}/responses`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: config.ai.model,
-      store: false,
-      instructions: repairNote ? `${baseInstructions} ${repairNote}` : baseInstructions,
-      input: [{ role: "user", content }],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "royaltyos_contract_extraction",
-          strict: true,
-          schema: contractSchema,
-        },
-      },
-    }),
-  });
-  const statedAdvance = extractAdvanceMinor(currentBlock);
-  const finishCall = async (response: Response) => {
-    const body = await response.json();
-    if (!response.ok) throw new Error(`OpenAI contract extraction failed (${response.status}): ${JSON.stringify(body)}`);
-    const text = outputText(body);
-    if (!text) throw new Error("OpenAI returned no structured contract output");
-    // Tolerant parse plus the semantic gate: truncated, fenced, or
-    // content-free replies trigger one repair retry instead of silent garbage.
-    const parsed = parseVisionJson(text);
-    assertVisionSemantics(parsed, currentChars, statedAdvance ?? undefined);
-    const extraction = { ...parsed, warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [] } as ContractExtraction;
-    for (const warning of serverWarnings) extraction.warnings.push(warning);
-    return { extraction, model: config.ai.model, rawResponseId: typeof body.id === "string" ? body.id : null };
-  };
-  try {
-    return await finishCall(await call());
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return await finishCall(await call(
-      `Your previous reply was rejected (${reason}). Reply again with ONLY the complete JSON object, no fences, no prose, no truncation.`,
-    ));
+  interface ProviderEndpoint {
+    name: string;
+    url: string;
+    model: string;
+    headers: Record<string, string>;
+    isChatCompletions: boolean;
   }
+
+  const targets: ProviderEndpoint[] = [];
+  if (config.ai.groqApiKey) {
+    targets.push({
+      name: `Groq (${config.ai.groqModel})`,
+      url: `${config.ai.groqBaseUrl}/chat/completions`,
+      model: config.ai.groqModel,
+      headers: { Authorization: `Bearer ${config.ai.groqApiKey}` },
+      isChatCompletions: true,
+    });
+    targets.push({
+      name: `Groq Fallback (${config.ai.groqFallbackModel})`,
+      url: `${config.ai.groqBaseUrl}/chat/completions`,
+      model: config.ai.groqFallbackModel,
+      headers: { Authorization: `Bearer ${config.ai.groqApiKey}` },
+      isChatCompletions: true,
+    });
+  }
+  if (config.ai.nvidiaApiKey) {
+    targets.push({
+      name: `NVIDIA NIM (${config.ai.nvidiaModel})`,
+      url: `${config.ai.nvidiaBaseUrl}/chat/completions`,
+      model: config.ai.nvidiaModel,
+      headers: { Authorization: `Bearer ${config.ai.nvidiaApiKey}` },
+      isChatCompletions: true,
+    });
+  }
+  if (config.ai.openaiApiKeys.length > 0) {
+    targets.push({
+      name: `OpenAI (${config.ai.model})`,
+      url: `${config.ai.baseUrl}/responses`,
+      model: config.ai.model,
+      headers: {},
+      isChatCompletions: false,
+    });
+  }
+
+  const statedAdvance = extractAdvanceMinor(currentBlock);
+
+  const executeTarget = async (target: ProviderEndpoint, repairNote?: string): Promise<{ response: Response; model: string }> => {
+    if (target.isChatCompletions) {
+      const userTextContent = content.map((c) => typeof c.text === "string" ? c.text : "").filter(Boolean).join("\n\n");
+      const chatBody = {
+        model: target.model,
+        messages: [
+          { role: "system", content: repairNote ? `${baseInstructions}\nREPAIR REQUIRED: Return ONLY valid JSON: ${repairNote}` : `${baseInstructions} Output MUST be a valid JSON object.` },
+          { role: "user", content: `Extract candidate financial rules from the following contract text into valid JSON format:\n\n${userTextContent}` },
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.1,
+      };
+      const response = await fetchImpl(target.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...target.headers },
+        body: JSON.stringify(chatBody),
+      });
+      return { response, model: target.model };
+    } else {
+      const response = await openaiFetch(config, fetchImpl, target.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: target.model,
+          store: false,
+          instructions: repairNote ? `${baseInstructions} ${repairNote}` : baseInstructions,
+          input: [{ role: "user", content }],
+          text: {
+            format: {
+              type: "json_schema",
+              name: "royaltyos_contract_extraction",
+              strict: true,
+              schema: contractSchema,
+            },
+          },
+        }),
+      });
+      return { response, model: target.model };
+    }
+  };
+
+  let lastError: Error | null = null;
+  for (const target of targets) {
+    try {
+      let { response, model } = await executeTarget(target);
+      if (!response.ok && response.status === 429) {
+        console.warn(`[RoyaltyOS] [WARN] AI_PROVIDER_RATE_LIMITED provider=${target.name} status=429 (waiting 4s before fallback)`);
+        await new Promise((r) => setTimeout(r, 4000));
+        const retryAttempt = await executeTarget(target);
+        if (retryAttempt.response.ok) {
+          response = retryAttempt.response;
+        }
+      }
+      if (!response.ok && (response.status === 429 || response.status === 401 || response.status === 402 || response.status === 404 || response.status >= 500)) {
+        console.warn(`[RoyaltyOS] [WARN] AI_PROVIDER_FAILED provider=${target.name} status=${response.status}`);
+        continue;
+      }
+
+      const finishCall = async (resp: Response) => {
+        const body = await resp.json();
+        if (!resp.ok) throw new Error(`Extraction call to ${target.name} failed (${resp.status}): ${JSON.stringify(body)}`);
+        const text = outputText(body);
+        if (!text) throw new Error(`${target.name} returned no structured contract output`);
+        const parsed = parseVisionJson(text);
+        assertVisionSemantics(parsed, currentChars, statedAdvance ?? undefined);
+        const extraction = {
+          ...parsed,
+          parties: Array.isArray(parsed.parties) ? parsed.parties : [],
+          rules: Array.isArray(parsed.rules) ? parsed.rules : [],
+          warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
+          conflicts: Array.isArray(parsed.conflicts) ? parsed.conflicts : [],
+        } as ContractExtraction;
+        for (const warning of serverWarnings) extraction.warnings.push(warning);
+        return { extraction, model, rawResponseId: typeof body.id === "string" ? body.id : null };
+      };
+
+      try {
+        return await finishCall(response);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        console.warn(`[RoyaltyOS] [WARN] AI_REPAIR_TRIGGERED provider=${target.name} reason=${reason}`);
+        const repair = await executeTarget(target, `Your previous reply was rejected (${reason}). Reply again with ONLY the complete JSON object, no fences, no prose, no truncation.`);
+        return await finishCall(repair.response);
+      }
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      console.warn(`[RoyaltyOS] [WARN] AI_PROVIDER_ERROR provider=${target.name} error=${lastError.message}`);
+    }
+  }
+
+  throw lastError ?? new Error("No AI extraction provider was able to process this contract");
 }
 
 /** Normalizes a model-provided key (Artist and Featured Creator both occur). */
