@@ -115,6 +115,10 @@ export async function handleContractRoutes(
     }
     if (body.fixedMinor !== undefined) { const n = Number(body.fixedMinor); if (!Number.isSafeInteger(n) || n < 0) throw statusError(400, "Invalid fixedMinor"); patch.fixed_minor = n; }
     if (body.priority !== undefined) { const n = Number(body.priority); if (!Number.isInteger(n) || n < 0) throw statusError(400, "Invalid priority"); patch.priority = n; }
+    if (body.base !== undefined) {
+      if (!["GROSS_REVENUE", "NET_REVENUE", "REMAINDER"].includes(String(body.base))) throw statusError(400, "Invalid base");
+      patch.base = String(body.base);
+    }
     if (body.config !== undefined && typeof body.config === "object") patch.config = body.config;
     if (body.conditions !== undefined && Array.isArray(body.conditions)) patch.conditions = body.conditions;
     const rows = await ctx.supabase.update<Record<string, any>>("candidate_rules", patch, { id: `eq.${match.id}` });

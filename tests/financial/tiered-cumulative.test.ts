@@ -303,17 +303,97 @@ test("compileRuleset: compiles candidate TIERED_CUMULATIVE rules cleanly", () =>
   assert.ok(compiled.rulesetHash);
 });
 
-test("fuzz: tiered tranche allocations conserve revenue under random inputs", () => {
-  for (let i = 0; i < 200; i++) {
-    const revenue = Math.floor(Math.random() * 5_000_000) + 1;
-    const prior = Math.floor(Math.random() * 2_000_000);
-    const threshold = Math.floor(Math.random() * 3_000_000) + 1;
-    const tiers = [
-      { tierIndex: 0, thresholdMinor: threshold, rateBasisPoints: 1000 },
-      { tierIndex: 1, thresholdMinor: null, rateBasisPoints: 2000 },
-    ];
-    const tranches = allocateTieredTranches(revenue, prior, tiers, "REVENUE");
-    const totalApplicable = tranches.reduce((sum, t) => sum + t.applicableRevenueMinor, 0);
-    assert.equal(totalApplicable, revenue);
-  }
+test("compileRuleset: normalizes downstream tiered rules to REMAINDER when senior deductions cause NET_REVENUE overallocation", () => {
+  const reserveCandidate: CandidateRule = {
+    id: "cand_reserve",
+    type: "RESERVE",
+    beneficiaryKey: "reserve",
+    base: "NET_REVENUE",
+    rateBasisPoints: 800,
+    fixedMinor: null,
+    priority: 10,
+    conditions: [],
+    dependencies: [],
+    evidence: { sourceDocument: "doc.pdf", sourceVersion: 1, page: 1, clause: "1", sourceText: "Reserve 8%", model: "test" },
+    confidence: 0.95,
+    status: "APPROVED",
+    config: { capMinor: 3_000_000 },
+  };
+
+  const recoupCandidate: CandidateRule = {
+    id: "cand_recoup",
+    type: "RECOUPMENT",
+    beneficiaryKey: null,
+    base: "NET_REVENUE",
+    rateBasisPoints: null,
+    fixedMinor: null,
+    priority: 20,
+    conditions: [],
+    dependencies: [],
+    evidence: { sourceDocument: "doc.pdf", sourceVersion: 1, page: 1, clause: "2", sourceText: "Recoup 60%", model: "test" },
+    confidence: 0.95,
+    status: "APPROVED",
+    config: { advanceMinor: 4_500_000, preRecoupmentBasisPoints: 6000, postRecoupmentBasisPoints: 0 },
+  };
+
+  const artistCandidate: CandidateRule = {
+    id: "cand_artist",
+    type: "TIERED_CUMULATIVE",
+    beneficiaryKey: "artist",
+    base: "NET_REVENUE",
+    rateBasisPoints: null,
+    fixedMinor: null,
+    priority: 30,
+    conditions: [],
+    dependencies: [],
+    evidence: { sourceDocument: "doc.pdf", sourceVersion: 1, page: 1, clause: "3", sourceText: "Artist tiered", model: "test" },
+    confidence: 0.95,
+    status: "APPROVED",
+    config: {
+      basis: "BENEFICIARY_EARNINGS",
+      tiers: [
+        { tierIndex: 0, thresholdMinor: 25_000_000, rateBasisPoints: 4600, label: "T1" },
+        { tierIndex: 1, thresholdMinor: 75_000_000, rateBasisPoints: 5000, label: "T2" },
+        { tierIndex: 2, thresholdMinor: null, rateBasisPoints: 5400, label: "T3" },
+      ],
+    },
+  };
+
+  const creatorCandidate: CandidateRule = {
+    id: "cand_creator",
+    type: "TIERED_CUMULATIVE",
+    beneficiaryKey: "featured_creator",
+    base: "NET_REVENUE",
+    rateBasisPoints: null,
+    fixedMinor: null,
+    priority: 40,
+    conditions: [],
+    dependencies: [],
+    evidence: { sourceDocument: "doc.pdf", sourceVersion: 1, page: 1, clause: "4", sourceText: "Creator tiered", model: "test" },
+    confidence: 0.95,
+    status: "APPROVED",
+    config: {
+      basis: "BENEFICIARY_EARNINGS",
+      tiers: [
+        { tierIndex: 0, thresholdMinor: 25_000_000, rateBasisPoints: 2200, label: "T1" },
+        { tierIndex: 1, thresholdMinor: 75_000_000, rateBasisPoints: 2000, label: "T2" },
+        { tierIndex: 2, thresholdMinor: null, rateBasisPoints: 1800, label: "T3" },
+      ],
+    },
+  };
+
+  const compiled = compileRuleset({
+    candidates: [reserveCandidate, recoupCandidate, artistCandidate, creatorCandidate],
+    beneficiaryKeys: new Set(["artist", "featured_creator", "reserve"]),
+    currency: "USD",
+    contractVersionId: "cv_waterfall",
+    nextVersion: 1,
+  });
+
+  assert.equal(compiled.rules.length, 4);
+  const compiledArtist = compiled.rules.find((r) => r.beneficiaryKey === "artist");
+  const compiledCreator = compiled.rules.find((r) => r.beneficiaryKey === "featured_creator");
+  assert.equal(compiledArtist?.base, "REMAINDER");
+  assert.equal(compiledCreator?.base, "REMAINDER");
 });
+

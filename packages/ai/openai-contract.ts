@@ -284,6 +284,7 @@ export async function extractContractWithOpenAI(
     "For recoupment rules, put advanceMinor, preRecoupmentBasisPoints and postRecoupmentBasisPoints into config when present.",
     "For category rules, put category into config. For caps/floors/thresholds, put targetRuleId/amountMinor fields into config when inferable.",
     "For DATE_RANGE and PRIORITY modifiers, use targetRuleId only when the target is unambiguous; otherwise keep the financial rule itself review-required. Use priorityValue for an explicit contractual priority number.",
+    "- WATERFALL BASE RULE: If a contract has a reserve (e.g. 8%) or recoupment recovery (e.g. 60%) deducted first, downstream payee royalty splits (e.g. Artist or Featured Creator) share the residual/remaining pool (Q_t, remainder after recoupment). You MUST set base: 'REMAINDER' for these payee rules (never 'NET_REVENUE', which causes percentage overallocation >100% and fails validation).",
     "Format rates as rate_basis_points (integer, percentage * 100), money as fixed_minor (integer minor units), and provide verbatim quote in source_text for every rule.",
   ].join("\n");
   interface ProviderEndpoint {

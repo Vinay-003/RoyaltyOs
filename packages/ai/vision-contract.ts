@@ -38,6 +38,7 @@ const SYSTEM_INSTRUCTIONS = [
   "beneficiary_key is REQUIRED for every rule that pays someone and must be the snake_case payee name; use reserve for remainder rules and null only for rules with no payee.",
   "A rate that applies to one revenue category MUST use type REVENUE_CATEGORY with config.category set. Never emit EXCLUSION without an explicit amountMinor.",
   "Money math: advanceMinor and fixedMinor are INTEGER minor units, dollars × 100 exactly (USD 2,000 → 200000). Never put a recoupment_remaining condition on a RECOUPMENT rule; the engine already selects pre/post rates from the remaining balance.",
+  "- WATERFALL BASE RULE: If a contract has a reserve (e.g. 8%) or recoupment recovery (e.g. 60%) deducted first, downstream payee royalty splits (e.g. Artist or Featured Creator) share the residual/remaining pool (Q_t, remainder after recoupment). You MUST set base: 'REMAINDER' for these payee rules (never 'NET_REVENUE', which causes percentage overallocation >100% and fails validation).",
   "Respond with ONLY the JSON object matching the requested schema: no markdown fences, no tables, no prose.",
 ].join("\n");
 

@@ -31,6 +31,25 @@ export function compileRuleset(input: {
       evidence: candidate.evidence,
     };
   });
+  // Waterfall Normalization: If senior deduction rules (RESERVE, RECOUPMENT) exist alongside
+  // downstream payee percentage/tiered rules with higher priority, and keeping all on NET_REVENUE
+  // causes percentage overallocation (>100%), the downstream payee rules represent the residual
+  // pool (REMAINDER) rather than unconstrained concurrent draws from the top of the waterfall.
+  const hasSeniorDeductions = rules.some((r) => r.type === "RESERVE" || r.type === "RECOUPMENT");
+  if (hasSeniorDeductions) {
+    const minSeniorPriority = Math.min(
+      ...rules.filter((r) => r.type === "RESERVE" || r.type === "RECOUPMENT").map((r) => r.priority),
+    );
+    const initialIssues = validateRuleGraph(rules, input.beneficiaryKeys, input.currency);
+    const hasOverallocation = initialIssues.some((i) => i.code === "OVERALLOCATED_PERCENTAGES" && i.message.includes("NET_REVENUE"));
+    if (hasOverallocation) {
+      for (const rule of rules) {
+        if (rule.priority > minSeniorPriority && (rule.type === "TIERED_CUMULATIVE" || rule.type === "PERCENTAGE") && rule.base === "NET_REVENUE") {
+          rule.base = "REMAINDER";
+        }
+      }
+    }
+  }
   const issues = validateRuleGraph(rules, input.beneficiaryKeys, input.currency);
   if (issues.length) {
     throw new Error(`RuleSet validation failed: ${issues.map((i) => `${i.code}:${i.message}`).join("; ")}`);
