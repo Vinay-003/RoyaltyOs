@@ -48,7 +48,7 @@
   "dependencies": {
     "@napi-rs/canvas": "^1.0.10",
     "lucide-react": "^1.59.0",
-    "pdfjs-dist": "^6.3.289",
+    "pdfjs-dist": "^6.4.299",
     "pg": "^8.23.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
