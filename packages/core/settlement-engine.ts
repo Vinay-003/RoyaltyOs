@@ -1,4 +1,5 @@
 import { allocateLargestRemainder, allocateTieredTranches, assertMinorUnits } from "./money.ts";
+import { evaluateFormula } from "./formula.ts";
 import type {
   CumulativeState,
   ExecutableRule,
@@ -275,6 +276,51 @@ export function calculateSettlement(
       });
       explanation.push(`Allocated ${payable} minor units under tiered rule ${rule.id} across ${tranches.length} tranche(s).`);
     }
+  }
+
+  // 3.8) Custom mathematical formula rules.
+  for (const rule of sorted.filter((r) => r.type === "FORMULA")) {
+    const formulaStr = stringConfig(rule, "formula");
+    if (!formulaStr) continue;
+    const relevantRec = rule.beneficiaryKey
+      ? [...recByRule.values()].find((r) => r.beneficiaryKey === rule.beneficiaryKey)?.remainingMinor ?? 0
+      : 0;
+    const cumState = cumByRule.get(rule.id) ?? (rule.beneficiaryKey ? cumByBeneficiary.get(rule.beneficiaryKey) : null);
+    if (!ruleMatchesWithDateModifiers(rule, rules, ctx, relevantRec, cumState)) continue;
+
+    const baseMinor = rule.base === "GROSS_REVENUE" ? ctx.revenueMinor : remaining;
+    const computed = evaluateFormula(formulaStr, {
+      revenue: ctx.revenueMinor,
+      gross_revenue: ctx.revenueMinor,
+      net_revenue: baseMinor,
+      cumulative_revenue: cumState?.cumulativeRevenueMinor ?? 0,
+      cumulative_earnings: cumState?.cumulativeEarningsMinor ?? 0,
+      recoupment_remaining: relevantRec,
+      rate: rule.rateBasisPoints !== null ? rule.rateBasisPoints / 10000 : 0,
+      fixed: rule.fixedMinor ?? 0,
+      category: ctx.category ?? "",
+      currency: ctx.currency,
+    });
+
+    const payable = Math.max(0, Math.min(remaining, Math.trunc(computed)));
+    remaining -= payable;
+    lines.push({
+      key: `formula:${rule.id}`,
+      beneficiaryKey: rule.beneficiaryKey ?? "formula",
+      ruleId: rule.id,
+      amountMinor: payable,
+      payableMinor: payable,
+      kind: "PAYABLE",
+      metadata: {
+        formula: formulaStr,
+        explanation: stringConfig(rule, "formulaExplanation") ?? "Custom formula evaluation",
+      },
+    });
+    if (cumState) {
+      cumState.cumulativeEarningsMinor += payable;
+      cumState.cumulativeRevenueMinor += baseMinor;
+    }
+    explanation.push(`Allocated ${payable} minor units under formula rule ${rule.id} ('${formulaStr}').`);
   }
 
   // 4) Percentage allocations. GROSS_REVENUE rules are calculated against the

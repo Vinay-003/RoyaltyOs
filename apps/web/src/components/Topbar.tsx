@@ -1,5 +1,5 @@
 import React from "react";
-import { Menu, FolderGit2, Building2 } from "lucide-react";
+import { Menu, FolderGit2, Building2, Sun, Moon } from "lucide-react";
 import { useApp } from "../lib/context.tsx";
 
 interface TopbarProps {
@@ -8,7 +8,7 @@ interface TopbarProps {
 }
 
 export function Topbar({ pageTitle, onToggleMobile }: TopbarProps) {
-  const { me, workspaceId, projectId, setWorkspaceId, setProjectId } = useApp();
+  const { me, workspaceId, projectId, theme, toggleTheme, setWorkspaceId, setProjectId } = useApp();
 
   const currentWorkspace = me?.workspaces.find((w) => w.id === workspaceId);
 
@@ -70,7 +70,17 @@ export function Topbar({ pageTitle, onToggleMobile }: TopbarProps) {
           </div>
         )}
 
-        <div style={{ padding: "4px 10px", background: "rgba(255,255,255,0.05)", borderRadius: 999, border: "1px solid var(--border-subtle)", fontSize: 11, color: "var(--text-secondary)" }}>
+        <button
+          onClick={toggleTheme}
+          className="btn btn-secondary"
+          title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
+          style={{ padding: "6px 10px", display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+        >
+          {theme === "light" ? <Moon size={14} /> : <Sun size={14} />}
+          <span style={{ fontSize: 11 }}>{theme === "light" ? "Dark" : "Light"}</span>
+        </button>
+
+        <div style={{ padding: "5px 12px", background: "var(--bg-card)", borderRadius: 999, border: "1px solid var(--border-subtle)", fontSize: 11, color: "var(--text-secondary)", fontWeight: 500 }}>
           {me?.email || "sandbox@royaltyos.internal"}
         </div>
       </div>

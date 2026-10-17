@@ -30,6 +30,8 @@ interface AppContextValue {
   projectId: string | null;
   currentWorkspace: WorkspaceInfo | null;
   currentProject: ProjectInfo | null;
+  theme: "light" | "dark";
+  toggleTheme: () => void;
   setWorkspaceId: (id: string) => void;
   setProjectId: (id: string) => void;
   refreshMe: () => Promise<void>;
@@ -41,12 +43,26 @@ const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<UserMe | null>(null);
   const [loading, setLoading] = useState(true);
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    return (localStorage.getItem("royaltyos_theme") as "light" | "dark") || "light";
+  });
   const [workspaceId, setWorkspaceIdState] = useState<string | null>(
     localStorage.getItem("royaltyos_workspace_id")
   );
   const [projectId, setProjectIdState] = useState<string | null>(
     localStorage.getItem("royaltyos_project_id")
   );
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    const next = theme === "light" ? "dark" : "light";
+    setTheme(next);
+    localStorage.setItem("royaltyos_theme", next);
+    document.documentElement.setAttribute("data-theme", next);
+  };
 
   const setWorkspaceId = (id: string) => {
     setWorkspaceIdState(id);
@@ -216,6 +232,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         projectId,
         currentWorkspace,
         currentProject,
+        theme,
+        toggleTheme,
         setWorkspaceId,
         setProjectId,
         refreshMe,

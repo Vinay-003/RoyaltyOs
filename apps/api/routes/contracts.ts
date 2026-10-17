@@ -18,6 +18,8 @@ import {
   uploadContractVersion,
 } from "../services.ts";
 import { calculateSettlement } from "../../../packages/core/settlement-engine.ts";
+import { assistRuleRefinement } from "../../../packages/ai/openai-contract.ts";
+import { newId } from "../../../packages/core/id.ts";
 import { ALL_READ_ROLES, CONTRACT_ROLES, FINANCE_ROLES, enforceRateLimit, workspaceFromProject } from "./helpers.ts";
 import { logEvent } from "../logger.ts";
 
@@ -121,9 +123,89 @@ export async function handleContractRoutes(
     }
     if (body.config !== undefined && typeof body.config === "object") patch.config = body.config;
     if (body.conditions !== undefined && Array.isArray(body.conditions)) patch.conditions = body.conditions;
+    if (body.beneficiaryKey !== undefined) patch.beneficiary_key = body.beneficiaryKey ? String(body.beneficiaryKey).trim() : null;
+    if (body.ruleType !== undefined) patch.rule_type = String(body.ruleType);
     const rows = await ctx.supabase.update<Record<string, any>>("candidate_rules", patch, { id: `eq.${match.id}` });
     await ctx.supabase.rpc("royaltyos_append_audit", { p_workspace_id: auth.workspaceId, p_actor_id: auth.user.id, p_action: `CANDIDATE_RULE_${action}`, p_resource_type: "CANDIDATE_RULE", p_resource_id: match.id, p_detail: `Candidate rule ${action.toLowerCase()} by authorized reviewer`, p_correlation_id: requestId });
     json(res, 200, rows[0]);
+    return true;
+  }
+
+  match = routeMatch("/api/v1/rules/candidates/:id/assist", path);
+  if (match && method === "POST") {
+    const auth = await authorizeByResource(ctx, req, "candidate_rules", match.id!, CONTRACT_ROLES, false);
+    const body = await readJson(req);
+    const prompt = requireString(body.prompt, "prompt", 2000);
+    const ruleRow = auth.resource;
+    const result = await assistRuleRefinement(ctx.config, {
+      rule: ruleRow,
+      prompt,
+      contractText: typeof body.contractText === "string" ? body.contractText : undefined,
+    }, ctx.fetchImpl);
+    json(res, 200, result);
+    return true;
+  }
+
+  if (method === "POST" && path === "/api/v1/rules/candidates") {
+    const body = await readJson(req);
+    const contractId = requireString(body.contractId, "contractId", 100);
+    const auth = await authorizeByResource(ctx, req, "contracts", contractId, CONTRACT_ROLES, true);
+    const analyses = await ctx.supabase.select<Record<string, any>>("contract_analyses", {
+      select: "id,contract_version_id",
+      contract_id: `eq.${contractId}`,
+      order: "created_at.desc",
+      limit: "1",
+    });
+    const analysisId = analyses[0]?.id ?? null;
+    const versionId = analyses[0]?.contract_version_id ?? null;
+    const id = newId();
+    const ruleType = requireString(body.ruleType || "FORMULA", "ruleType", 50);
+    const beneficiaryKey = body.beneficiaryKey ? String(body.beneficiaryKey).trim() : null;
+    const base = ["GROSS_REVENUE", "NET_REVENUE", "REMAINDER"].includes(body.base) ? body.base : "REMAINDER";
+    const priority = typeof body.priority === "number" ? body.priority : 10;
+    const rateBasisPoints = body.rateBasisPoints !== undefined && body.rateBasisPoints !== null ? Number(body.rateBasisPoints) : null;
+    const fixedMinor = body.fixedMinor !== undefined && body.fixedMinor !== null ? Number(body.fixedMinor) : null;
+    const config = typeof body.config === "object" && body.config !== null ? body.config : {};
+    const conditions = Array.isArray(body.conditions) ? body.conditions : [];
+    const newRule = {
+      id,
+      workspace_id: auth.workspaceId,
+      analysis_id: analysisId,
+      contract_version_id: versionId,
+      rule_type: ruleType,
+      beneficiary_key: beneficiaryKey,
+      base,
+      rate_basis_points: rateBasisPoints,
+      fixed_minor: fixedMinor,
+      priority,
+      conditions,
+      config,
+      dependencies: [],
+      evidence: {
+        sourceDocument: "manual_operator_rule",
+        sourceVersion: 1,
+        page: null,
+        clause: body.clause || "Operator Defined Rule",
+        sourceText: body.sourceText || "Manually defined rule by operator",
+        model: "human-operator",
+      },
+      confidence: 1.0,
+      status: "APPROVED",
+      reviewed_by: auth.user.id,
+      reviewed_at: new Date().toISOString(),
+      review_note: body.reviewNote || "Authored by operator",
+    };
+    const rows = await ctx.supabase.insert<Record<string, any>>("candidate_rules", newRule);
+    await ctx.supabase.rpc("royaltyos_append_audit", {
+      p_workspace_id: auth.workspaceId,
+      p_actor_id: auth.user.id,
+      p_action: "CANDIDATE_RULE_MANUALLY_CREATED",
+      p_resource_type: "CANDIDATE_RULE",
+      p_resource_id: id,
+      p_detail: `Operator manually defined ${ruleType} rule`,
+      p_correlation_id: requestId,
+    });
+    json(res, 201, rows[0] ?? newRule);
     return true;
   }
 

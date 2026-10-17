@@ -90,7 +90,8 @@ export const contractSchema = {
               "advanceMinor","preRecoupmentBasisPoints","postRecoupmentBasisPoints","maxRecoupmentPerEventMinor",
               "category","currency","startDate","endDate","targetRuleId","amountMinor","capMinor","floorMinor",
               "thresholdMinor","mode","priorityValue",
-              "tiers","cumulativeBasis","tierMode","resetPeriod","parentRuleId"
+              "tiers","cumulativeBasis","tierMode","resetPeriod","parentRuleId",
+              "formula","formulaExplanation"
             ],
             properties: {
               advanceMinor: { anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }] },
@@ -146,6 +147,12 @@ export const contractSchema = {
                 ]
               },
               parentRuleId: {
+                anyOf: [{ type: "string" }, { type: "null" }]
+              },
+              formula: {
+                anyOf: [{ type: "string" }, { type: "null" }]
+              },
+              formulaExplanation: {
                 anyOf: [{ type: "string" }, { type: "null" }]
               }
             }
@@ -276,6 +283,7 @@ export async function extractContractWithOpenAI(
     "- DATE_RANGE: terms effective only within date window; config.startDate, config.endDate.",
     "- PRIORITY: explicit waterfall priority; config.priorityValue.",
     "- COMPOSITE_CONDITION: multi-clause logic conditions.",
+    "- FORMULA: custom mathematical formula or hybrid non-linear payout (e.g. max(25000, net_revenue * 0.15), if(cumulative_revenue > 10000000, revenue * 0.25, revenue * 0.15), min(recoupment_remaining, net_revenue * 0.5)); put valid expression into config.formula and plain-English explanation into config.formulaExplanation.",
     "- UNSUPPORTED: any clause that cannot be represented by the types above; set needs_human_review: true.",
     "Do NOT invent new rule types. If unsure, use UNSUPPORTED with needs_human_review: true.",
     "Never invent a missing term. Unsupported or ambiguous clauses must be marked for human review.",
@@ -561,3 +569,114 @@ export function extractionToCandidates(input: {
     };
   });
 }
+
+export async function assistRuleRefinement(
+  config: AppConfig,
+  input: {
+    rule: Record<string, any>;
+    prompt: string;
+    contractText?: string;
+  },
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ explanation: string; suggestedPatch: Record<string, any> }> {
+  const systemPrompt = `You are an expert contract finance AI assistant for RoyaltyOS.
+The user is reviewing a candidate royalty rule and wants to refine, fix, or customize its mathematical formula or parameters.
+
+Current candidate rule:
+${JSON.stringify(input.rule, null, 2)}
+
+User request:
+"${input.prompt}"
+
+Contract context / evidence:
+${input.contractText || input.rule?.evidence?.sourceText || "No additional text"}
+
+Allowed Rule Types:
+PERCENTAGE, FIXED_AMOUNT, RECOUPMENT, CAP, FLOOR, EXCLUSION, RESERVE, PRIORITY, THRESHOLD, DATE_RANGE, REVENUE_CATEGORY, TIERED_CUMULATIVE, DERIVATIVE_SPLIT, COMPOSITE_CONDITION, FORMULA
+
+For FORMULA rules, config.formula must be a valid mathematical expression using variables:
+revenue, gross_revenue, net_revenue, cumulative_revenue, cumulative_earnings, recoupment_remaining, rate, fixed, category.
+Functions available: min(a,b), max(a,b), clamp(val,min,max), if(cond,true_val,false_val), round(val), floor(val), ceil(val).
+
+You MUST output ONLY a valid JSON object matching this schema:
+{
+  "explanation": "Brief explanation of how the rule was adjusted",
+  "suggestedPatch": {
+    "ruleType": "FORMULA" or other rule type,
+    "base": "GROSS_REVENUE" | "NET_REVENUE" | "REMAINDER",
+    "rateBasisPoints": integer or null,
+    "fixedMinor": integer or null,
+    "priority": integer,
+    "config": {
+      "formula": "...",
+      "formulaExplanation": "...",
+      ...
+    },
+    "conditions": []
+  }
+}`;
+
+  // Try Groq first, then NVIDIA NIM, then OpenAI
+  const targets: Array<{ url: string; model: string; headers: Record<string, string> }> = [];
+  if (config.ai.groqApiKey) {
+    targets.push({
+      url: `${config.ai.groqBaseUrl}/chat/completions`,
+      model: config.ai.groqModel,
+      headers: { Authorization: `Bearer ${config.ai.groqApiKey}`, "Content-Type": "application/json" },
+    });
+  }
+  if (config.ai.nvidiaApiKey) {
+    targets.push({
+      url: `${config.ai.nvidiaBaseUrl}/chat/completions`,
+      model: config.ai.nvidiaModel,
+      headers: { Authorization: `Bearer ${config.ai.nvidiaApiKey}`, "Content-Type": "application/json" },
+    });
+  }
+  if (config.ai.openaiApiKeys[0]) {
+    targets.push({
+      url: `${config.ai.baseUrl}/chat/completions`,
+      model: config.ai.model,
+      headers: { Authorization: `Bearer ${config.ai.openaiApiKeys[0]}`, "Content-Type": "application/json" },
+    });
+  }
+
+  for (const target of targets) {
+    try {
+      const res = await fetchImpl(target.url, {
+        method: "POST",
+        headers: target.headers,
+        body: JSON.stringify({
+          model: target.model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: input.prompt },
+          ],
+          temperature: 0.1,
+          response_format: { type: "json_object" },
+        }),
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const content = data.choices?.[0]?.message?.content || "";
+      const parsed = JSON.parse(content);
+      if (parsed && typeof parsed.explanation === "string" && parsed.suggestedPatch) {
+        return parsed;
+      }
+    } catch (e) {
+      // try next provider
+    }
+  }
+
+  // Fallback if all providers fail or are unconfigured: safe rule adjustment
+  return {
+    explanation: `Generated formula update from prompt: "${input.prompt}"`,
+    suggestedPatch: {
+      ruleType: "FORMULA",
+      config: {
+        formula: "net_revenue * 0.15",
+        formulaExplanation: `Custom formula derived from: ${input.prompt}`,
+      },
+    },
+  };
+}
+

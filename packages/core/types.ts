@@ -13,6 +13,7 @@ export const RULE_TYPES = [
   "TIERED_CUMULATIVE",
   "DERIVATIVE_SPLIT",
   "COMPOSITE_CONDITION",
+  "FORMULA",
 ] as const;
 
 export type RuleType = (typeof RULE_TYPES)[number];
