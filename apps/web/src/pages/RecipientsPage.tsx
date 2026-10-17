@@ -1,21 +1,23 @@
 import React, { useEffect, useState } from "react";
 import { useApp } from "../lib/context.tsx";
-import { api, showToast } from "../lib/api.ts";
+import { api, withStepUp, showToast } from "../lib/api.ts";
 import { Users, Plus, Mail } from "lucide-react";
 
 export function RecipientsPage() {
-  const { projectId } = useApp();
+  const { workspaceId, projectId } = useApp();
   const [recipients, setRecipients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [key, setKey] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const loadRecipients = async () => {
-    if (!projectId) return;
+    if (!projectId && !workspaceId) return;
     try {
-      const data = await api<any[]>(`/api/v1/beneficiaries?projectId=${projectId}`);
-      setRecipients(data);
+      const target = projectId ? `/api/v1/beneficiaries?projectId=${projectId}` : `/api/v1/beneficiaries?workspaceId=${workspaceId}`;
+      const data = await api<any[]>(target);
+      setRecipients(Array.isArray(data) ? data : []);
     } catch (err: any) {
       showToast(err.message, "error");
     } finally {
@@ -25,28 +27,33 @@ export function RecipientsPage() {
 
   useEffect(() => {
     loadRecipients();
-  }, [projectId]);
+  }, [projectId, workspaceId]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!key.trim() || !email.trim()) return;
+    setSubmitting(true);
     try {
-      await api("/api/v1/beneficiaries", {
-        method: "POST",
-        json: {
-          projectId,
-          beneficiaryKey: key.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_"),
-          name: name.trim() || key.trim(),
-          email: email.trim(),
-        },
-      });
+      await withStepUp(() =>
+        api("/api/v1/beneficiaries", {
+          method: "POST",
+          json: {
+            projectId,
+            beneficiaryKey: key.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_"),
+            displayName: name.trim() || key.trim(),
+            payoutEmail: email.trim(),
+          },
+        })
+      );
       showToast("Beneficiary registered", "success");
       setName("");
       setEmail("");
       setKey("");
-      loadRecipients();
+      await loadRecipients();
     } catch (err: any) {
       showToast(err.message, "error");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -104,8 +111,8 @@ export function RecipientsPage() {
               />
             </div>
 
-            <button type="submit" className="btn btn-primary" style={{ width: "100%", marginTop: 8 }}>
-              <Plus size={14} /> Register Beneficiary
+            <button type="submit" disabled={submitting} className="btn btn-primary" style={{ width: "100%", marginTop: 8 }}>
+              <Plus size={14} /> {submitting ? "Registering..." : "Register Beneficiary"}
             </button>
           </form>
         </section>
@@ -131,11 +138,15 @@ export function RecipientsPage() {
               <tbody>
                 {recipients.map((r) => (
                   <tr key={r.id}>
-                    <td className="mono" style={{ fontWeight: 600, color: "#fff" }}>{r.beneficiary_key}</td>
-                    <td>{r.name}</td>
-                    <td>{r.email}</td>
+                    <td className="mono" style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+                      {r.beneficiary_key}
+                    </td>
+                    <td style={{ fontWeight: 500 }}>{r.display_name || r.name}</td>
+                    <td style={{ color: "var(--text-secondary)" }}>{r.payout_email || r.email || "Non-payable"}</td>
                     <td>
-                      <span className="badge badge-green">ACTIVE</span>
+                      <span className={`badge ${r.status === "ACTIVE" ? "badge-green" : "badge-amber"}`}>
+                        {r.status || "ACTIVE"}
+                      </span>
                     </td>
                   </tr>
                 ))}

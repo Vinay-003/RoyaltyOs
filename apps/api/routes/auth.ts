@@ -123,6 +123,20 @@ export async function handleAuthRoutes(
     return true;
   }
 
+  if (method === "POST" && path === "/api/v1/auth/change-password") {
+    const p = await principal(ctx, req);
+    await enforceRateLimit(ctx, `change-pw:${p.id}`, 5, 900);
+    if (!p.email) throw statusError(400, "Authenticated account has no email");
+    const body = await readJson(req, 1024 * 1024);
+    const currentPassword = requireString(body.currentPassword, "currentPassword", 200);
+    const newPassword = requireString(body.newPassword, "newPassword", 200);
+    if (newPassword.length < 10) throw statusError(400, "New password must be at least 10 characters");
+    await ctx.supabase.signIn(p.email, currentPassword);
+    await ctx.supabase.adminUpdateUser(p.id, { password: newPassword });
+    json(res, 200, { ok: true, message: "Password updated successfully" });
+    return true;
+  }
+
   if (method === "GET" && (path === "/api/v1/me" || path === "/api/v1/auth/me")) {
     const p = await principal(ctx, req);
     const memberships = await listWorkspaces(ctx, p.id);

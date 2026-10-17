@@ -69,7 +69,7 @@ interface ChatMessage {
 }
 
 export function ContractsPage() {
-  const { projectId } = useApp();
+  const { workspaceId, projectId } = useApp();
   const [contracts, setContracts] = useState<ContractItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ContractAnalysisDetail | null>(null);
@@ -108,12 +108,14 @@ export function ContractsPage() {
   });
 
   const loadContracts = async () => {
-    if (!projectId) return;
+    if (!projectId && !workspaceId) return;
     try {
-      const list = await api<ContractItem[]>(`/api/v1/contracts?projectId=${projectId}`);
-      setContracts(list);
-      if (!selectedId && list[0]) {
-        setSelectedId(list[0].id);
+      const target = projectId ? `/api/v1/contracts?projectId=${projectId}` : `/api/v1/contracts?workspaceId=${workspaceId}`;
+      const list = await api<ContractItem[]>(target);
+      const safeList = Array.isArray(list) ? list : [];
+      setContracts(safeList);
+      if (!selectedId && safeList[0]) {
+        setSelectedId(safeList[0].id);
       }
     } catch (err: any) {
       showToast(err.message, "error");
@@ -133,7 +135,7 @@ export function ContractsPage() {
 
   useEffect(() => {
     loadContracts();
-  }, [projectId]);
+  }, [projectId, workspaceId]);
 
   useEffect(() => {
     if (selectedId) loadDetail(selectedId);
@@ -141,11 +143,15 @@ export function ContractsPage() {
 
   const handleCreateContract = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!projectId || !newTitle.trim()) return;
+    if (!newTitle.trim() || (!projectId && !workspaceId)) return;
     try {
       const res = await api<ContractItem>("/api/v1/contracts", {
         method: "POST",
-        json: { projectId, title: newTitle.trim() },
+        json: {
+          workspaceId,
+          projectId,
+          title: newTitle.trim(),
+        },
       });
       showToast("Contract agreement created", "success");
       setContracts((prev) => [res, ...prev]);
@@ -160,17 +166,30 @@ export function ContractsPage() {
       showToast("Select a PDF file first", "warn");
       return;
     }
+    if (!/\.pdf$/i.test(selectedFile.name)) {
+      showToast("Only PDF documents are supported", "warn");
+      return;
+    }
     setUploading(true);
     try {
-      const form = new FormData();
-      form.append("file", selectedFile);
-      form.append("title", selectedFile.name.replace(/\.pdf$/i, ""));
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(",")[1]!);
+        reader.onerror = reject;
+        reader.readAsDataURL(selectedFile);
+      });
 
-      const res = await api<{ contractVersionId: string; version: number }>(
-        `/api/v1/contracts/${selectedId}/upload`,
-        { method: "POST", body: form }
+      const res = await api<{ version: number }>(
+        `/api/v1/contracts/${selectedId}/documents`,
+        {
+          method: "POST",
+          json: {
+            filename: selectedFile.name,
+            fileBase64: base64,
+          },
+        }
       );
-      showToast(`Uploaded sealed version v${res.version}`, "success");
+      showToast(`Uploaded sealed version v${res?.version ?? 1}`, "success");
       setSelectedFile(null);
       await loadDetail(selectedId);
     } catch (err: any) {
@@ -183,13 +202,15 @@ export function ContractsPage() {
   const handleRunAi = async () => {
     if (!selectedId) return;
     setAnalyzing(true);
-    showToast("Extracting contract terms via Groq AI...", "info");
+    showToast("Extracting contract terms via AI (can take 30-60s)...", "info");
     try {
+      const versionId = detail?.version?.id;
       const res = await api<{ candidatesCount: number }>(`/api/v1/contracts/${selectedId}/analyze`, {
         method: "POST",
-        json: {},
+        json: versionId ? { versionId } : {},
       });
-      showToast(`Extracted ${res.candidatesCount} candidate rules for review`, "success");
+      const count = res?.candidatesCount ?? 0;
+      showToast(count > 0 ? `Extracted ${count} candidate rule(s) for review` : "AI analysis completed", "success");
       await loadDetail(selectedId);
     } catch (err: any) {
       showToast(err.message, "error");
@@ -200,10 +221,12 @@ export function ContractsPage() {
 
   const handleReviewRule = async (ruleId: string, action: "APPROVE" | "REJECT") => {
     try {
-      await api(`/api/v1/rules/candidates/${ruleId}/review`, {
-        method: "POST",
-        json: { action },
-      });
+      await withStepUp(() =>
+        api(`/api/v1/rules/candidates/${ruleId}/review`, {
+          method: "POST",
+          json: { action },
+        })
+      );
       setDetail((prev) => {
         if (!prev) return null;
         return {
@@ -272,19 +295,21 @@ export function ContractsPage() {
         formulaExplanation: editForm.formulaExplanation ? editForm.formulaExplanation.trim() : null,
       };
 
-      const updated = await api(`/api/v1/rules/candidates/${editingRule.id}/review`, {
-        method: "POST",
-        json: {
-          action: "UPDATE",
-          ruleType: editForm.ruleType,
-          beneficiaryKey: editForm.beneficiaryKey ? editForm.beneficiaryKey.trim() : null,
-          base: editForm.base,
-          rateBasisPoints: Number(editForm.rateBasisPoints),
-          fixedMinor: Number(editForm.fixedMinor),
-          priority: Number(editForm.priority),
-          config: patchConfig,
-        },
-      });
+      await withStepUp(() =>
+        api(`/api/v1/rules/candidates/${editingRule.id}/review`, {
+          method: "POST",
+          json: {
+            action: "UPDATE",
+            ruleType: editForm.ruleType,
+            beneficiaryKey: editForm.beneficiaryKey ? editForm.beneficiaryKey.trim() : null,
+            base: editForm.base,
+            rateBasisPoints: Number(editForm.rateBasisPoints),
+            fixedMinor: Number(editForm.fixedMinor),
+            priority: Number(editForm.priority),
+            config: patchConfig,
+          },
+        })
+      );
 
       showToast("Rule updated successfully", "success");
       setEditingRule(null);
@@ -354,10 +379,12 @@ export function ContractsPage() {
       if (patch.priority !== undefined) updatePayload.priority = patch.priority;
       if (patch.config) updatePayload.config = { ...(chatRule.config || {}), ...patch.config };
 
-      await api(`/api/v1/rules/candidates/${chatRule.id}/review`, {
-        method: "POST",
-        json: updatePayload,
-      });
+      await withStepUp(() =>
+        api(`/api/v1/rules/candidates/${chatRule.id}/review`, {
+          method: "POST",
+          json: updatePayload,
+        })
+      );
 
       showToast("AI adjustments applied to rule!", "success");
       setChatRule(null);
@@ -372,24 +399,26 @@ export function ContractsPage() {
     e.preventDefault();
     if (!selectedId) return;
     try {
-      await api("/api/v1/rules/candidates", {
-        method: "POST",
-        json: {
-          contractId: selectedId,
-          ruleType: addForm.ruleType,
-          beneficiaryKey: addForm.beneficiaryKey,
-          base: addForm.base,
-          rateBasisPoints: Number(addForm.rateBasisPoints),
-          fixedMinor: Number(addForm.fixedMinor),
-          priority: Number(addForm.priority),
-          clause: addForm.clause,
-          sourceText: addForm.sourceText,
-          config: {
-            formula: addForm.formula,
-            formulaExplanation: addForm.formulaExplanation,
+      await withStepUp(() =>
+        api("/api/v1/rules/candidates", {
+          method: "POST",
+          json: {
+            contractId: selectedId,
+            ruleType: addForm.ruleType,
+            beneficiaryKey: addForm.beneficiaryKey,
+            base: addForm.base,
+            rateBasisPoints: Number(addForm.rateBasisPoints),
+            fixedMinor: Number(addForm.fixedMinor),
+            priority: Number(addForm.priority),
+            clause: addForm.clause,
+            sourceText: addForm.sourceText,
+            config: {
+              formula: addForm.formula,
+              formulaExplanation: addForm.formulaExplanation,
+            },
           },
-        },
-      });
+        })
+      );
 
       showToast("Custom rule created successfully!", "success");
       setShowAddModal(false);

@@ -5,7 +5,7 @@ import { formatMoney } from "../lib/format.ts";
 import { PlayCircle, CheckCircle2, DollarSign } from "lucide-react";
 
 export function SimulatorPage() {
-  const { projectId, currentProject } = useApp();
+  const { projectId, workspaceId, currentProject } = useApp();
   const [activeRuleset, setActiveRuleset] = useState<any>(null);
   const [revenueDollars, setRevenueDollars] = useState("100000");
   const [category, setCategory] = useState("all");
@@ -13,11 +13,12 @@ export function SimulatorPage() {
   const [simulating, setSimulating] = useState(false);
 
   useEffect(() => {
-    if (!projectId) return;
-    api(`/api/v1/rulesets/active?projectId=${projectId}`)
-      .then((data) => setActiveRuleset(data.ruleset))
+    if (!projectId && !workspaceId) return;
+    const query = projectId ? `projectId=${projectId}` : `workspaceId=${workspaceId}`;
+    api(`/api/v1/rulesets/active?${query}`)
+      .then((data: any) => setActiveRuleset(data?.ruleset ?? null))
       .catch(() => {});
-  }, [projectId]);
+  }, [projectId, workspaceId]);
 
   const currency = currentProject?.currency || "USD";
 
@@ -55,8 +56,9 @@ export function SimulatorPage() {
   return (
     <div>
       <div style={{ marginBottom: 20 }}>
-        <h2 style={{ fontSize: 24, fontWeight: 700, margin: "0 0 6px" }}>Deterministic Scenario Simulator</h2>
-        <p style={{ margin: 0, fontSize: 13, color: "var(--text-muted)" }}>
+        <div className="kicker" style={{ marginBottom: 4 }}>DETERMINISTIC SIMULATION</div>
+        <h1 style={{ fontSize: 24, fontWeight: 700, margin: "0 0 6px" }}>Scenario Simulator</h1>
+        <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
           Run synthetic financial calculations against the active RuleSet to verify exact penny allocations.
         </p>
       </div>
@@ -65,7 +67,7 @@ export function SimulatorPage() {
         <section className="card">
           <div className="card-header">
             <div>
-              <h3 className="card-title">Scenario Parameters</h3>
+              <h2 className="card-title">Scenario Parameters</h2>
               <p className="card-sub">
                 Targeting Active RuleSet {activeRuleset ? `v${activeRuleset.version}` : "(None Active)"}
               </p>
@@ -110,23 +112,23 @@ export function SimulatorPage() {
           <section className="card">
             <div className="card-header">
               <div>
-                <h3 className="card-title">Calculation Breakdown</h3>
+                <h2 className="card-title">Calculation Breakdown</h2>
                 <p className="card-sub">Penny-perfect allocation across waterfall</p>
               </div>
-              <span className="badge badge-green">Conserved</span>
+              <span className="badge badge-success">Conserved</span>
             </div>
 
             <div className="grid-2" style={{ marginBottom: 16 }}>
               <div style={{ background: "var(--bg-input)", padding: 12, borderRadius: 8 }}>
                 <div style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase" }}>Total Inflow</div>
-                <div className="amount" style={{ fontSize: 18, fontWeight: 700, color: "#fff" }}>
+                <div className="amount" style={{ fontSize: 18, fontWeight: 700, color: "var(--text-primary)" }}>
                   {formatMoney(result.revenueMinor, currency)}
                 </div>
               </div>
 
               <div style={{ background: "var(--bg-input)", padding: 12, borderRadius: 8 }}>
                 <div style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase" }}>Payable Payouts</div>
-                <div className="amount" style={{ fontSize: 18, fontWeight: 700, color: "#34d399" }}>
+                <div className="amount" style={{ fontSize: 18, fontWeight: 700, color: "var(--status-success)" }}>
                   {formatMoney(result.payableMinor, currency)}
                 </div>
               </div>
@@ -148,11 +150,11 @@ export function SimulatorPage() {
                         {line.beneficiaryKey?.replace(/_/g, " ") || "Reserve"}
                       </td>
                       <td>
-                        <span className={`badge ${line.kind === "RESERVE" ? "badge-blue" : "badge-neutral"}`} style={{ fontSize: 9 }}>
+                        <span className={`badge ${line.kind === "RESERVE" ? "badge-neutral" : "badge-neutral"}`} style={{ fontSize: 9 }}>
                           {line.kind}
                         </span>
                       </td>
-                      <td className="amount" style={{ color: line.payableMinor > 0 ? "#fff" : "var(--text-muted)" }}>
+                      <td className="amount" style={{ color: line.payableMinor > 0 ? "var(--text-primary)" : "var(--text-muted)" }}>
                         {formatMoney(line.amountMinor, currency)}
                       </td>
                     </tr>

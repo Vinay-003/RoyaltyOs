@@ -19,7 +19,7 @@ import {
 } from "../services.ts";
 import { sha256Hex } from "../../../packages/core/hash.ts";
 import { buildPayoutIdempotencyKey } from "../../../packages/paypal/idempotency.ts";
-import { ALL_READ_ROLES, FINANCE_ROLES, header, idempotencyHeader, listSettlementViews, resolveWebhookWorkspace, workspaceFromProject } from "./helpers.ts";
+import { ALL_READ_ROLES, FINANCE_ROLES, header, idempotencyHeader, listSettlementViews, resolveWebhookWorkspace, resolveWorkspaceId, resolveProjectId, workspaceFromProject } from "./helpers.ts";
 import { logEvent } from "../logger.ts";
 
 export async function handleFinanceRoutes(
@@ -34,43 +34,59 @@ export async function handleFinanceRoutes(
 
   if (method === "GET" && path === "/api/v1/invoices") {
     const p = await principal(ctx, req);
-    const projectId = requireString(url.searchParams.get("projectId"), "projectId", 100);
-    const project = await workspaceFromProject(ctx, projectId);
-    await ctx.repo.requireRole(p.id, String(project.workspace_id), ALL_READ_ROLES);
-    json(res, 200, await ctx.supabase.select("invoices", { select: "*", project_id: `eq.${projectId}`, order: "created_at.desc" }));
-    return true;
+    const projectId = url.searchParams.get("projectId");
+    const workspaceId = url.searchParams.get("workspaceId");
+    if (projectId) {
+      const project = await workspaceFromProject(ctx, projectId);
+      await ctx.repo.requireRole(p.id, String(project.workspace_id), ALL_READ_ROLES);
+      json(res, 200, await ctx.supabase.select("invoices", { select: "*", project_id: `eq.${projectId}`, order: "created_at.desc" }));
+      return true;
+    }
+    if (workspaceId) {
+      await ctx.repo.requireRole(p.id, workspaceId, ALL_READ_ROLES);
+      json(res, 200, await ctx.supabase.select("invoices", { select: "*", workspace_id: `eq.${workspaceId}`, order: "created_at.desc" }));
+      return true;
+    }
+    throw statusError(400, "projectId or workspaceId required");
   }
 
   if (method === "POST" && path === "/api/v1/invoices") {
     const body = await readJson(req);
-    const workspaceId = requireString(body.workspaceId, "workspaceId", 100);
-    const projectId = requireString(body.projectId, "projectId", 100);
+    const projectId = body.projectId ? requireString(body.projectId, "projectId", 100) : null;
+    let workspaceId = body.workspaceId ? String(body.workspaceId).trim() : null;
+    let project: Record<string, any> | null = null;
+    if (projectId) {
+      project = await workspaceFromProject(ctx, projectId);
+      if (!workspaceId) workspaceId = String(project.workspace_id);
+    }
+    if (!workspaceId) throw statusError(400, "workspaceId or projectId required");
     const { user } = await authorizeWorkspace(ctx, req, workspaceId, FINANCE_ROLES);
-    const project = await workspaceFromProject(ctx, projectId);
-    if (String(project.workspace_id) !== workspaceId) throw statusError(404, "Project not found in workspace");
+    const finalProjectId = projectId ?? (await resolveProjectId(ctx, url, { workspaceId }));
+    if (!finalProjectId) throw statusError(400, "No project associated with workspace");
     const amountMinor = requireMinor(body.amountMinor, "amountMinor");
-    const recipientEmail = requireEmail(body.recipientEmail, "recipientEmail");
-    const itemName = requireString(body.itemName, "itemName", 250);
+    const recipientEmail = requireEmail(body.recipientEmail ?? body.email, "recipientEmail");
+    const itemName = requireString(body.itemName ?? body.description ?? body.item ?? "Platform Inbound Revenue", "itemName", 250);
     const idempotencyKey = idempotencyHeader(req);
-    logEvent("info", "API_INVOICE_CREATE_REQUEST", { workspaceId, projectId, amountMinor, recipientEmail, itemName });
+    logEvent("info", "API_INVOICE_CREATE_REQUEST", { workspaceId, projectId: finalProjectId, amountMinor, recipientEmail, itemName });
     const existing = await ctx.supabase.select<Record<string, any>>("invoices", { select: "*", workspace_id: `eq.${workspaceId}`, request_id: `eq.${idempotencyKey}`, limit: "1" });
     if (existing[0]) {
       json(res, 200, existing[0]);
       return true;
     }
     const invoiceInput: Parameters<typeof ctx.paypal.createInvoice>[0] = {
-      requestId: idempotencyKey, currency: String(body.currency ?? ctx.config.paypal.currency), recipientEmail, itemName, amountMinor, reference: `RoyaltyOS ${projectId}`,
+      requestId: idempotencyKey, currency: String(body.currency ?? ctx.config.paypal.currency), recipientEmail, itemName, amountMinor, reference: `RoyaltyOS ${finalProjectId}`,
     };
     if (body.note) invoiceInput.note = String(body.note).slice(0, 4000);
     const { gateway: workspacePaypal } = await paypalForWorkspace(ctx, workspaceId);
     const paypal = await workspacePaypal.createInvoice(invoiceInput);
     if (typeof paypal?.id !== "string") throw new Error("PayPal did not return an invoice id");
-    const rows = await ctx.supabase.insert<Record<string, any>>("invoices", { workspace_id: workspaceId, project_id: projectId, created_by: user.id, paypal_invoice_id: paypal.id, recipient_email: recipientEmail, item_name: itemName, amount_minor: amountMinor, currency: body.currency ?? ctx.config.paypal.currency, status: paypal.status ?? "DRAFT", recipient_view_url: paypal?.detail?.metadata?.recipient_view_url ?? null, request_id: idempotencyKey });
+    const rows = await ctx.supabase.insert<Record<string, any>>("invoices", { workspace_id: workspaceId, project_id: finalProjectId, created_by: user.id, paypal_invoice_id: paypal.id, recipient_email: recipientEmail, item_name: itemName, amount_minor: amountMinor, currency: body.currency ?? ctx.config.paypal.currency, status: paypal.status ?? "DRAFT", recipient_view_url: paypal?.detail?.metadata?.recipient_view_url ?? null, request_id: idempotencyKey });
     await ctx.supabase.rpc("royaltyos_append_audit", { p_workspace_id: workspaceId, p_actor_id: user.id, p_action: "INVOICE_CREATED", p_resource_type: "INVOICE", p_resource_id: String(rows[0]?.id), p_detail: `PayPal draft invoice ${paypal.id} created`, p_correlation_id: requestId });
     logEvent("info", "API_INVOICE_CREATED", { invoiceId: rows[0]?.id, paypalInvoiceId: paypal.id, status: rows[0]?.status });
     json(res, 201, rows[0]);
     return true;
   }
+
 
   let match = routeMatch("/api/v1/invoices/:id/send", path);
   if (match && method === "POST") {
@@ -176,11 +192,20 @@ export async function handleFinanceRoutes(
 
   if (method === "GET" && path === "/api/v1/revenue-events") {
     const p = await principal(ctx, req);
-    const projectId = requireString(url.searchParams.get("projectId"), "projectId", 100);
-    const project = await workspaceFromProject(ctx, projectId);
-    await ctx.repo.requireRole(p.id, String(project.workspace_id), ALL_READ_ROLES);
-    json(res, 200, await ctx.supabase.select("revenue_events", { select: "*", project_id: `eq.${projectId}`, order: "received_at.desc" }));
-    return true;
+    const projectId = url.searchParams.get("projectId");
+    const workspaceId = url.searchParams.get("workspaceId");
+    if (projectId) {
+      const project = await workspaceFromProject(ctx, projectId);
+      await ctx.repo.requireRole(p.id, String(project.workspace_id), ALL_READ_ROLES);
+      json(res, 200, await ctx.supabase.select("revenue_events", { select: "*", project_id: `eq.${projectId}`, order: "received_at.desc" }));
+      return true;
+    }
+    if (workspaceId) {
+      await ctx.repo.requireRole(p.id, workspaceId, ALL_READ_ROLES);
+      json(res, 200, await ctx.supabase.select("revenue_events", { select: "*", workspace_id: `eq.${workspaceId}`, order: "received_at.desc" }));
+      return true;
+    }
+    throw statusError(400, "projectId or workspaceId required");
   }
 
   if (method === "POST" && path === "/api/v1/settlements") {
@@ -198,7 +223,7 @@ export async function handleFinanceRoutes(
 
   if (method === "GET" && path === "/api/v1/settlements") {
     const p = await principal(ctx, req);
-    const workspaceId = requireString(url.searchParams.get("workspaceId"), "workspaceId", 100);
+    const workspaceId = await resolveWorkspaceId(ctx, url);
     await ctx.repo.requireRole(p.id, workspaceId, ALL_READ_ROLES);
     json(res, 200, await listSettlementViews(ctx, workspaceId));
     return true;
@@ -282,7 +307,7 @@ export async function handleFinanceRoutes(
 
   if (method === "GET" && path === "/api/v1/payouts") {
     const p = await principal(ctx, req);
-    const workspaceId = requireString(url.searchParams.get("workspaceId"), "workspaceId", 100);
+    const workspaceId = await resolveWorkspaceId(ctx, url);
     await ctx.repo.requireRole(p.id, workspaceId, ALL_READ_ROLES);
     const batches = await ctx.supabase.select<Record<string, any>>("payout_batches", { select: "*", workspace_id: `eq.${workspaceId}`, order: "created_at.desc" });
     const out: any[] = [];
@@ -293,7 +318,7 @@ export async function handleFinanceRoutes(
 
   if (method === "GET" && path === "/api/v1/reports/royalties") {
     const p = await principal(ctx, req);
-    const workspaceId = requireString(url.searchParams.get("workspaceId"), "workspaceId", 100);
+    const workspaceId = await resolveWorkspaceId(ctx, url);
     const membership = await ctx.repo.requireRole(p.id, workspaceId, ALL_READ_ROLES);
     const requested = url.searchParams.get("beneficiaryKey");
     const beneficiaryKey = membership.role === "CONTRIBUTOR" ? membership.beneficiary_key : requested;
@@ -315,7 +340,7 @@ export async function handleFinanceRoutes(
 
   if (method === "GET" && path === "/api/v1/audit") {
     const p = await principal(ctx, req);
-    const workspaceId = requireString(url.searchParams.get("workspaceId"), "workspaceId", 100);
+    const workspaceId = await resolveWorkspaceId(ctx, url);
     await ctx.repo.requireRole(p.id, workspaceId, ALL_READ_ROLES);
     const [integrity, ledger, events] = await Promise.all([
       ctx.supabase.rpc("royaltyos_verify_audit_chain", { p_workspace_id: workspaceId }),
@@ -328,7 +353,7 @@ export async function handleFinanceRoutes(
 
   if (method === "GET" && path === "/api/v1/notifications") {
     const p = await principal(ctx, req);
-    const workspaceId = requireString(url.searchParams.get("workspaceId"), "workspaceId", 100);
+    const workspaceId = await resolveWorkspaceId(ctx, url);
     const membership = await ctx.repo.requireRole(p.id, workspaceId, ALL_READ_ROLES);
     const rows = await ctx.supabase.select<Record<string, any>>("notifications", {
       select: "id,user_id,recipient_email,channel,event_type,subject,payload,status,attempts,provider_message_id,last_error,created_at,sent_at",
@@ -341,7 +366,7 @@ export async function handleFinanceRoutes(
 
   if (method === "GET" && path === "/api/v1/insights") {
     const p = await principal(ctx, req);
-    const workspaceId = requireString(url.searchParams.get("workspaceId"), "workspaceId", 100);
+    const workspaceId = await resolveWorkspaceId(ctx, url);
     await ctx.repo.requireRole(p.id, workspaceId, ALL_READ_ROLES);
     const [revenues, settlements, invoices, rulesets, payouts, recoupments, ledgerTx, webhookEvents, audit, reconciliationIssues, financialIntegrity] = await Promise.all([
       ctx.supabase.select<Record<string, any>>("revenue_events", { select: "*", workspace_id: `eq.${workspaceId}` }),
@@ -379,6 +404,94 @@ export async function handleFinanceRoutes(
       invoicesByStatus: Object.entries(invoices.reduce((acc: Record<string, number>, row) => { acc[String(row.status)] = (acc[String(row.status)] ?? 0) + 1; return acc; }, {})),
       recoupments,
     });
+    return true;
+  }
+
+  // Route aliases for projects: /api/v1/projects/:projectId/insights and dashboard
+  const projectInsightsMatch = routeMatch("/api/v1/projects/:projectId/insights", path);
+  const projectDashboardMatch = routeMatch("/api/v1/projects/:projectId/dashboard", path);
+  if (method === "GET" && (projectInsightsMatch || projectDashboardMatch)) {
+    const p = await principal(ctx, req);
+    const projectId = (projectInsightsMatch || projectDashboardMatch)!.projectId!;
+    const project = await workspaceFromProject(ctx, projectId);
+    const workspaceId = String(project.workspace_id);
+    await ctx.repo.requireRole(p.id, workspaceId, ALL_READ_ROLES);
+    const [revenues, settlements, invoices, rulesets, payouts, recoupments, ledgerTx, webhookEvents, audit, reconciliationIssues, financialIntegrity] = await Promise.all([
+      ctx.supabase.select<Record<string, any>>("revenue_events", { select: "*", workspace_id: `eq.${workspaceId}` }),
+      ctx.supabase.select<Record<string, any>>("settlements", { select: "*", workspace_id: `eq.${workspaceId}` }),
+      ctx.supabase.select<Record<string, any>>("invoices", { select: "*", workspace_id: `eq.${workspaceId}` }),
+      ctx.supabase.select<Record<string, any>>("rulesets", { select: "*", workspace_id: `eq.${workspaceId}` }),
+      ctx.supabase.select<Record<string, any>>("payout_batches", { select: "*", workspace_id: `eq.${workspaceId}` }),
+      ctx.supabase.select<Record<string, any>>("recoupment_accounts", { select: "*", workspace_id: `eq.${workspaceId}` }),
+      ctx.supabase.select<Record<string, any>>("ledger_transactions", { select: "*", workspace_id: `eq.${workspaceId}` }),
+      ctx.supabase.select<Record<string, any>>("webhook_events", { select: "*", workspace_id: `eq.${workspaceId}`, verification_status: "eq.SUCCESS" }),
+      ctx.supabase.rpc<any>("royaltyos_verify_audit_chain", { p_workspace_id: workspaceId }),
+      ctx.supabase.select<Record<string, any>>("reconciliation_issues", { select: "*", workspace_id: `eq.${workspaceId}`, status: "eq.OPEN", order: "created_at.desc", limit: "25" }),
+      ctx.supabase.rpc<any>("royaltyos_financial_integrity", { p_workspace_id: workspaceId }),
+    ]);
+    const latestSettlement = [...settlements].sort((a, b) => Date.parse(String(b.created_at)) - Date.parse(String(a.created_at)))[0];
+    const latestLines = latestSettlement ? await ctx.supabase.select<Record<string, any>>("settlement_lines", { select: "*", settlement_id: `eq.${latestSettlement.id}`, order: "amount_minor.desc" }) : [];
+    const successfulPayoutItems: Record<string, any>[] = [];
+    for (const batch of payouts.filter((b) => b.status === "SUCCESS")) successfulPayoutItems.push(...await ctx.supabase.select<Record<string, any>>("payout_items", { select: "*", payout_batch_id: `eq.${batch.id}`, status: "eq.SUCCESS" }));
+    const totalRev = revenues.reduce((s, r) => s + Number(r.distributable_minor), 0);
+    const totalPayout = successfulPayoutItems.reduce((s, i) => s + Number(i.amount_minor), 0);
+    const activeRuleset = rulesets.find((r) => r.status === "ACTIVE") ?? null;
+    let activeRuleCount = 0;
+    if (activeRuleset) {
+      const activeRules = await ctx.supabase.select<Record<string, any>>("rules", { select: "id", ruleset_id: `eq.${activeRuleset.id}` });
+      activeRuleCount = activeRules.length;
+    }
+    json(res, 200, {
+      totalRevenueMinor: totalRev,
+      totalPayoutMinor: totalPayout,
+      reserveBalanceMinor: recoupments.reduce((s, r) => s + Number(r.remaining_minor ?? 0), 0),
+      activeRuleset: activeRuleset ? { version: activeRuleset.version, id: activeRuleset.id, ruleCount: activeRuleCount } : null,
+      recentSettlements: settlements.slice(0, 10).map((s) => ({ ...s, period: s.period || `Cycle ${s.id.slice(0, 8)}`, revenue_minor: s.distributable_minor })),
+      metrics: {
+        revenueMinor: totalRev,
+        settlementCount: settlements.length,
+        pendingSettlementCount: settlements.filter((s) => !["SUCCESS"].includes(String(s.status))).length,
+        payoutSuccessMinor: totalPayout,
+        invoiceCount: invoices.length,
+        activeRulesetCount: rulesets.filter((r) => r.status === "ACTIVE").length,
+        verifiedWebhookCount: webhookEvents.length,
+        ledgerTransactionCount: ledgerTx.length,
+        openReconciliationIssueCount: reconciliationIssues.length,
+      },
+      auditIntegrity: audit,
+      financialIntegrity,
+      reconciliationIssues,
+      latestSettlement: latestSettlement ? { ...latestSettlement, lines: latestLines } : null,
+      invoicesByStatus: Object.entries(invoices.reduce((acc: Record<string, number>, row) => { acc[String(row.status)] = (acc[String(row.status)] ?? 0) + 1; return acc; }, {})),
+      recoupments,
+    });
+    return true;
+  }
+
+  // Route alias for project royalties: /api/v1/projects/:projectId/royalties
+  const projectRoyaltiesMatch = routeMatch("/api/v1/projects/:projectId/royalties", path);
+  if (method === "GET" && projectRoyaltiesMatch) {
+    const p = await principal(ctx, req);
+    const projectId = projectRoyaltiesMatch.projectId!;
+    const project = await workspaceFromProject(ctx, projectId);
+    const workspaceId = String(project.workspace_id);
+    const membership = await ctx.repo.requireRole(p.id, workspaceId, ALL_READ_ROLES);
+    const requested = url.searchParams.get("beneficiaryKey");
+    const beneficiaryKey = membership.role === "CONTRIBUTOR" ? membership.beneficiary_key : requested;
+    let lines = await ctx.supabase.select<Record<string, any>>("settlement_lines", { select: "*", workspace_id: `eq.${workspaceId}`, order: "created_at.desc" });
+    if (beneficiaryKey) lines = lines.filter((line) => line.beneficiary_key === beneficiaryKey);
+    lines = lines.filter((line) => !["reserve", "excluded"].includes(String(line.beneficiary_key)));
+    const rows: any[] = [];
+    for (const line of lines) {
+      const settlement = (await ctx.supabase.select<Record<string, any>>("settlements", { select: "*", id: `eq.${line.settlement_id}`, limit: "1" }))[0];
+      const revenue = settlement ? (await ctx.supabase.select<Record<string, any>>("revenue_events", { select: "*", id: `eq.${settlement.revenue_event_id}`, limit: "1" }))[0] : null;
+      const rule = line.rule_id ? (await ctx.supabase.select<Record<string, any>>("rules", { select: "*", id: `eq.${line.rule_id}`, limit: "1" }))[0] : null;
+      const evidence = line.rule_id ? (await ctx.supabase.select<Record<string, any>>("rule_evidence", { select: "*", rule_id: `eq.${line.rule_id}`, limit: "1" }))[0] : null;
+      const payoutItem = (await ctx.supabase.select<Record<string, any>>("payout_items", { select: "*", settlement_line_id: `eq.${line.id}`, order: "updated_at.desc", limit: "1" }))[0] ?? null;
+      rows.push({ line, settlement, revenue, rule, evidence, payoutItem });
+    }
+    const recoupments = await ctx.supabase.select<Record<string, any>>("recoupment_accounts", { select: "*", workspace_id: `eq.${workspaceId}` });
+    json(res, 200, { scope: beneficiaryKey ?? "ALL", rows, recoupments, totalPayableMinor: rows.reduce((s, r) => s + Number(r.line.payable_minor ?? 0), 0) });
     return true;
   }
 

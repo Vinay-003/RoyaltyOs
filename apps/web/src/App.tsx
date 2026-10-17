@@ -4,6 +4,7 @@ import { Sidebar } from "./components/Sidebar.tsx";
 import { Topbar } from "./components/Topbar.tsx";
 import { ToastContainer } from "./components/Toast.tsx";
 import { StepUpModal } from "./components/StepUpModal.tsx";
+import { ErrorBoundary } from "./components/ErrorBoundary.tsx";
 
 import { DashboardPage } from "./pages/DashboardPage.tsx";
 import { ContractsPage } from "./pages/ContractsPage.tsx";
@@ -136,7 +137,9 @@ export function App() {
           onToggleMobile={() => setMobileOpen(!mobileOpen)}
         />
         <main className="app-content">
-          {renderPage()}
+          <ErrorBoundary key={normalized}>
+            {renderPage()}
+          </ErrorBoundary>
         </main>
       </div>
       <ToastContainer />

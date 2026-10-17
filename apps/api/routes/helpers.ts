@@ -110,6 +110,33 @@ export async function resolveWebhookWorkspace(ctx: AppContext, event: any): Prom
   return null;
 }
 
+export async function resolveWorkspaceId(ctx: AppContext, url: URL, body?: any): Promise<string> {
+  const ws = url.searchParams.get("workspaceId") || body?.workspaceId;
+  if (ws && typeof ws === "string" && ws.trim()) return ws.trim();
+  const proj = url.searchParams.get("projectId") || body?.projectId;
+  if (proj && typeof proj === "string" && proj.trim()) {
+    const project = await workspaceFromProject(ctx, proj.trim());
+    return String(project.workspace_id);
+  }
+  throw statusError(400, "workspaceId or projectId required");
+}
+
+export async function resolveProjectId(ctx: AppContext, url: URL, body?: any): Promise<string | null> {
+  const proj = url.searchParams.get("projectId") || body?.projectId;
+  if (proj && typeof proj === "string" && proj.trim()) return proj.trim();
+  const ws = url.searchParams.get("workspaceId") || body?.workspaceId;
+  if (ws && typeof ws === "string" && ws.trim()) {
+    const projects = await ctx.supabase.select<Record<string, any>>("projects", {
+      select: "id",
+      workspace_id: `eq.${ws.trim()}`,
+      order: "created_at.asc",
+      limit: "1",
+    });
+    return projects[0]?.id ? String(projects[0].id) : null;
+  }
+  return null;
+}
+
 export async function listSettlementViews(ctx: AppContext, workspaceId: string) {
   const settlements = await ctx.supabase.select<Record<string, any>>("settlements", {
     select: "*",
@@ -127,3 +154,4 @@ export async function listSettlementViews(ctx: AppContext, workspaceId: string) 
   }
   return result;
 }
+

@@ -35,32 +35,45 @@ export async function handleContractRoutes(
 
   if (method === "GET" && path === "/api/v1/contracts") {
     const p = await principal(ctx, req);
-    const projectId = requireString(url.searchParams.get("projectId"), "projectId", 100);
-    const project = await workspaceFromProject(ctx, projectId);
-    await ctx.repo.requireRole(p.id, String(project.workspace_id), ALL_READ_ROLES);
-    json(res, 200, await ctx.supabase.select("contracts", { select: "*", project_id: `eq.${projectId}`, order: "created_at.desc" }));
-    return true;
+    const projectId = url.searchParams.get("projectId");
+    const workspaceId = url.searchParams.get("workspaceId");
+    if (projectId) {
+      const project = await workspaceFromProject(ctx, projectId);
+      await ctx.repo.requireRole(p.id, String(project.workspace_id), ALL_READ_ROLES);
+      json(res, 200, await ctx.supabase.select("contracts", { select: "*", project_id: `eq.${projectId}`, order: "created_at.desc" }));
+      return true;
+    }
+    if (workspaceId) {
+      await ctx.repo.requireRole(p.id, workspaceId, ALL_READ_ROLES);
+      json(res, 200, await ctx.supabase.select("contracts", { select: "*", workspace_id: `eq.${workspaceId}`, order: "created_at.desc" }));
+      return true;
+    }
+    throw statusError(400, "projectId or workspaceId required");
   }
 
   if (method === "POST" && path === "/api/v1/contracts") {
     const body = await readJson(req);
-    const workspaceId = requireString(body.workspaceId, "workspaceId", 100);
     const projectId = requireString(body.projectId, "projectId", 100);
+    const project = await workspaceFromProject(ctx, projectId);
+    const workspaceId = body.workspaceId ? String(body.workspaceId).trim() : String(project.workspace_id);
     const { user } = await authorizeWorkspace(ctx, req, workspaceId, CONTRACT_ROLES);
     const contract = await createContract(ctx, { workspaceId, projectId, title: requireString(body.title, "title", 200), actorId: user.id });
     json(res, 201, contract);
     return true;
   }
 
-  let match = routeMatch("/api/v1/contracts/:id/documents", path);
+  let match = routeMatch("/api/v1/contracts/:id/documents", path) || routeMatch("/api/v1/contracts/:id/upload", path);
   if (match && method === "POST") {
     const auth = await authorizeByResource(ctx, req, "contracts", match.id!, CONTRACT_ROLES);
     await enforceRateLimit(ctx, `contract-upload:${auth.user.id}`, 20, 3600);
     const body = await readJson(req, ctx.config.security.maxUploadBytes * 2);
-    const filename = requireString(body.filename, "filename", 240);
-    if (!filename.toLowerCase().endsWith(".pdf")) throw statusError(400, "Only PDF files are supported");
-    const bytes = parseBase64Data(requireString(body.fileBase64, "fileBase64", ctx.config.security.maxUploadBytes * 2));
-    const result = await uploadContractVersion(ctx, { workspaceId: auth.workspaceId, contractId: match.id!, actorId: auth.user.id, filename, bytes, effectiveAt: body.effectiveAt ?? null });
+    const filename = requireString(body.filename || body.title || "contract.pdf", "filename", 240);
+    const safeFilename = filename.toLowerCase().endsWith(".pdf") ? filename : `${filename}.pdf`;
+    let fileBase64 = body.fileBase64 || body.file;
+    if (typeof fileBase64 !== "string") throw statusError(400, "fileBase64 string required");
+    if (fileBase64.includes(",")) fileBase64 = fileBase64.split(",")[1]!;
+    const bytes = parseBase64Data(fileBase64);
+    const result = await uploadContractVersion(ctx, { workspaceId: auth.workspaceId, contractId: match.id!, actorId: auth.user.id, filename: safeFilename, bytes, effectiveAt: body.effectiveAt ?? null });
     json(res, 201, result);
     return true;
   }
@@ -70,11 +83,21 @@ export async function handleContractRoutes(
     const auth = await authorizeByResource(ctx, req, "contracts", match.id!, CONTRACT_ROLES);
     await enforceRateLimit(ctx, `contract-ai:${auth.user.id}`, 10, 3600);
     const body = await readJson(req);
-    const versionId = requireString(body.versionId, "versionId", 100);
+    let versionId = body.versionId ? String(body.versionId) : null;
+    if (!versionId) {
+      const versions = await ctx.supabase.select<Record<string, any>>("contract_versions", {
+        select: "id",
+        contract_id: `eq.${match.id}`,
+        order: "version.desc",
+        limit: "1",
+      });
+      versionId = versions[0]?.id ? String(versions[0].id) : null;
+    }
+    if (!versionId) throw statusError(400, "No contract version uploaded yet to analyze");
     logEvent("info", "API_ANALYZE_REQUEST", { contractId: match.id, versionId, userId: auth.user.id });
     const result = await analyzeContractVersion(ctx, { workspaceId: auth.workspaceId, contractId: match.id!, versionId, actorId: auth.user.id });
     logEvent("info", "API_ANALYZE_COMPLETED", { contractId: match.id, versionId, candidateCount: result?.candidates?.length ?? 0 });
-    json(res, 200, result);
+    json(res, 200, { candidatesCount: result?.candidates?.length ?? 0, ...result });
     return true;
   }
 
@@ -89,6 +112,16 @@ export async function handleContractRoutes(
     const analysis = (await ctx.supabase.select<Record<string, any>>("contract_analyses", { select: "*", contract_version_id: `eq.${version.id}`, order: "created_at.desc", limit: "1" }))[0] ?? null;
     const rules = analysis ? await ctx.supabase.select("candidate_rules", { select: "*", analysis_id: `eq.${analysis.id}`, order: "priority.asc" }) : [];
     json(res, 200, { workspaceId: auth.workspaceId, version, analysis, rules });
+    return true;
+  }
+
+  match = routeMatch("/api/v1/contracts/:id", path);
+  if (match && method === "GET") {
+    const auth = await authorizeByResource(ctx, req, "contracts", match.id!, ALL_READ_ROLES);
+    const contract = auth.resource ?? (await ctx.supabase.select<Record<string, any>>("contracts", { select: "*", id: `eq.${match.id}`, limit: "1" }))[0];
+    if (!contract) throw statusError(404, "Contract not found");
+    const versions = await ctx.supabase.select<Record<string, any>>("contract_versions", { select: "*", contract_id: `eq.${match.id}`, order: "version.desc" });
+    json(res, 200, { ...contract, versions });
     return true;
   }
 
@@ -218,9 +251,24 @@ export async function handleContractRoutes(
 
   if (method === "GET" && path === "/api/v1/rulesets/active") {
     const p = await principal(ctx, req);
-    const projectId = requireString(url.searchParams.get("projectId"), "projectId", 100);
-    const project = await workspaceFromProject(ctx, projectId);
-    await ctx.repo.requireRole(p.id, String(project.workspace_id), ALL_READ_ROLES);
+    const projectIdParam = url.searchParams.get("projectId");
+    const workspaceIdParam = url.searchParams.get("workspaceId");
+    let projectId = projectIdParam;
+    let workspaceId = workspaceIdParam;
+    if (projectId) {
+      const project = await workspaceFromProject(ctx, projectId);
+      workspaceId = String(project.workspace_id);
+    } else if (workspaceId) {
+      const projects = await ctx.supabase.select<Record<string, any>>("projects", {
+        select: "id",
+        workspace_id: `eq.${workspaceId}`,
+        order: "created_at.asc",
+        limit: "1",
+      });
+      projectId = projects[0]?.id ? String(projects[0].id) : null;
+    }
+    if (!projectId || !workspaceId) throw statusError(400, "projectId or workspaceId required");
+    await ctx.repo.requireRole(p.id, workspaceId, ALL_READ_ROLES);
     const data = await loadActiveSettlementInputs(ctx, projectId);
     json(res, 200, data);
     return true;

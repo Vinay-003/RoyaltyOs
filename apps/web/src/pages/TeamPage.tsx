@@ -10,8 +10,8 @@ export function TeamPage() {
 
   useEffect(() => {
     if (!workspaceId) return;
-    api(`/api/v1/workspaces/${workspaceId}/members`)
-      .then(setMembers)
+    api<any[]>(`/api/v1/workspaces/${workspaceId}/members`)
+      .then((data) => setMembers(Array.isArray(data) ? data : []))
       .catch((err) => showToast(err.message, "warn"))
       .finally(() => setLoading(false));
   }, [workspaceId]);
@@ -19,8 +19,9 @@ export function TeamPage() {
   return (
     <div>
       <div style={{ marginBottom: 20 }}>
-        <h2 style={{ fontSize: 24, fontWeight: 700, margin: "0 0 6px" }}>Workspace Access & Roles</h2>
-        <p style={{ margin: 0, fontSize: 13, color: "var(--text-muted)" }}>
+        <div className="kicker" style={{ marginBottom: 4 }}>GOVERNANCE & PERMISSIONS</div>
+        <h1 style={{ fontSize: 24, fontWeight: 700, margin: "0 0 6px" }}>Workspace Access & Roles</h1>
+        <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
           Role-based access control (RBAC) governing contract approval and settlement execution.
         </p>
       </div>
@@ -28,7 +29,7 @@ export function TeamPage() {
       <section className="card">
         <div className="card-header">
           <div>
-            <h3 className="card-title">Team Members</h3>
+            <h2 className="card-title">Team Members</h2>
             <p className="card-sub">Authorized personnel for this workspace</p>
           </div>
         </div>
@@ -37,26 +38,35 @@ export function TeamPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>User Email</th>
+                <th>User / Display Name</th>
                 <th>Role</th>
-                <th>Permissions</th>
+                <th>Permissions Scope</th>
               </tr>
             </thead>
             <tbody>
               {members.map((m) => (
-                <tr key={m.id}>
-                  <td style={{ fontWeight: 600 }}>{m.email}</td>
+                <tr key={m.id || m.user_id}>
                   <td>
-                    <span className="badge badge-blue">{m.role}</span>
+                    <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+                      {m.displayName || m.email || "User"}
+                    </div>
+                    {m.displayName && m.email && (
+                      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{m.email}</div>
+                    )}
                   </td>
-                  <td style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                    {m.role === "FINANCE_ADMIN" ? "Full payment, rule activation, and contract review" : "Read-only ledger access"}
+                  <td>
+                    <span className="badge badge-neutral">{m.role}</span>
+                  </td>
+                  <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                    {m.role === "OWNER" || m.role === "FINANCE_APPROVER"
+                      ? "Full payment, rule activation, and contract review"
+                      : "Read-only ledger access"}
                   </td>
                 </tr>
               ))}
               {members.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={3} style={{ textAlign: "center", padding: 24, color: "var(--text-muted)" }}>
+                  <td colSpan={3} style={{ textAlign: "center", padding: 24, color: "var(--text-secondary)" }}>
                     No additional team members found.
                   </td>
                 </tr>

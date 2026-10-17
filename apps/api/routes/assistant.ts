@@ -4,7 +4,7 @@ import type { AppContext } from "../context.ts";
 import { json, readJson, requireString } from "../http.ts";
 import { runPayPalReadOnlyAssistant } from "../../../packages/paypal-ai/mcp-assistant.ts";
 import { paypalForWorkspace } from "../services.ts";
-import { enforceRateLimit } from "./helpers.ts";
+import { enforceRateLimit, workspaceFromProject } from "./helpers.ts";
 
 /**
  * Read-only PayPal intelligence. The assistant runs against the official PayPal
@@ -21,12 +21,18 @@ export async function handleAssistantRoutes(
   const method = req.method ?? "GET";
   const path = url.pathname;
 
-  if (method === "POST" && path === "/api/v1/assistant/paypal") {
+  if (method === "POST" && (path === "/api/v1/assistant/paypal" || path === "/api/v1/paypal-agent/ask")) {
     const body = await readJson(req);
-    const workspaceId = requireString(body.workspaceId, "workspaceId", 100);
+    let workspaceId = body.workspaceId ? String(body.workspaceId).trim() : null;
+    if (!workspaceId && body.projectId) {
+      const project = await workspaceFromProject(ctx, String(body.projectId).trim());
+      workspaceId = String(project.workspace_id);
+    }
+    if (!workspaceId) throw requireString("", "workspaceId or projectId", 100);
     const auth = await authorizeWorkspace(ctx, req, workspaceId, ["OWNER", "FINANCE_APPROVER", "AUDITOR"]);
     await enforceRateLimit(ctx, `paypal-ai:${auth.user.id}`, 20, 600);
-    const question = requireString(body.question, "question", 2000);
+    const rawQuestion = body.question ?? body.prompt ?? body.q;
+    const question = requireString(rawQuestion, "question", 2000);
     // Workspace-scoped records lead: PayPal's own invoice list is
     // merchant-scoped, so a shared merchant app would leak other workspaces'
     // invoices into the answer. Our rows are always this workspace's truth.
@@ -44,7 +50,7 @@ export async function handleAssistantRoutes(
       recipientEmail: String(row.recipient_email ?? ""),
     })));
     await ctx.supabase.rpc("royaltyos_append_audit", { p_workspace_id: workspaceId, p_actor_id: auth.user.id, p_action: "PAYPAL_AI_READONLY_QUERY", p_resource_type: "PAYPAL_AI", p_resource_id: String(result.responseId ?? requestId), p_detail: `Read-only PayPal assistant query over ${records.length} workspace invoice(s)`, p_correlation_id: requestId });
-    json(res, 200, result);
+    json(res, 200, { answer: result.text, ...result });
     return true;
   }
 

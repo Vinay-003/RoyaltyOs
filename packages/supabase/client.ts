@@ -141,9 +141,10 @@ export class SupabaseClient {
     return result.payload as { id: string; email?: string; user_metadata?: Record<string, unknown> };
   }
 
-  async adminUpdateUser(userId: string, attributes: { displayName?: string }) {
+  async adminUpdateUser(userId: string, attributes: { displayName?: string; password?: string }) {
     const body: Record<string, unknown> = {};
     if (typeof attributes.displayName === "string") body.user_metadata = { display_name: attributes.displayName };
+    if (typeof attributes.password === "string") body.password = attributes.password;
     const result = await this.request(`/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
       method: "PUT",
       body,

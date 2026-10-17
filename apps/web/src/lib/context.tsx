@@ -124,7 +124,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const wsMap = new Map<string, WorkspaceInfo>();
       for (const m of memberships) {
         const wsId = String(m.workspace_id);
-        const wsName = m.workspaces?.name || "RoyaltyOS Workspace";
+        const wsName = m.workspaces?.name || (Array.isArray(m.workspaces) ? m.workspaces[0]?.name : null) || "RoyaltyOS Workspace";
         wsMap.set(wsId, {
           id: wsId,
           name: wsName,
@@ -133,41 +133,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
         });
       }
 
-      // Fallback workspace if none was found
-      if (wsMap.size === 0) {
-        wsMap.set("ws-default", {
-          id: "ws-default",
-          name: "Default Workspace",
-          role: "OWNER",
-          projects: [],
-        });
+      // If user has workspaces but no projects, trigger bootstrap to ensure real DB records
+      if (wsMap.size > 0 && projects.length === 0) {
+        try {
+          await api<{ workspaceId: string; projectId: string }>("/api/v1/bootstrap", {
+            method: "POST",
+            json: {},
+          });
+          projects = await api<ProjectInfo[]>("/api/v1/projects");
+        } catch (bootErr) {
+          console.warn("Bootstrap projects error:", bootErr);
+        }
       }
 
       for (const p of projects) {
+        if (!p.id || p.id === "proj-default") continue;
         const targetWs = wsMap.get(p.workspace_id || "") || Array.from(wsMap.values())[0];
         if (targetWs) {
           targetWs.projects.push({
             id: p.id,
-            name: p.name || "Main Campaign",
+            name: p.name || "Main Production Project",
             currency: p.currency || "USD",
             ...(p.workspace_id ? { workspace_id: p.workspace_id } : {}),
           });
         }
       }
 
-      // Ensure every workspace has at least 1 fallback project if none exists yet
-      for (const ws of wsMap.values()) {
-        if (ws.projects.length === 0) {
-          ws.projects.push({
-            id: "proj-default",
-            name: "Main Production Project",
-            currency: "USD",
-            workspace_id: ws.id,
-          });
-        }
-      }
-
       const workspaces = Array.from(wsMap.values());
+
+      // Clean up legacy/corrupted localStorage values
+      const rawWsId = localStorage.getItem("royaltyos_workspace_id");
+      const rawProjId = localStorage.getItem("royaltyos_project_id");
+      if (rawWsId === "ws-default") localStorage.removeItem("royaltyos_workspace_id");
+      if (rawProjId === "proj-default") localStorage.removeItem("royaltyos_project_id");
 
       // Determine active workspace
       const savedWsId = localStorage.getItem("royaltyos_workspace_id");
@@ -178,11 +176,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         // Determine active project
         const savedProjId = localStorage.getItem("royaltyos_project_id");
-        const currentProj = currentWs.projects.find((p) => p.id === savedProjId) ?? currentWs.projects[0];
+        const currentProj = currentWs.projects.find((p) => p.id === savedProjId);
+        const firstProj = currentWs.projects[0];
         if (currentProj) {
           setProjectIdState(currentProj.id);
           localStorage.setItem("royaltyos_project_id", currentProj.id);
+        } else if (firstProj) {
+          setProjectIdState(firstProj.id);
+          localStorage.setItem("royaltyos_project_id", firstProj.id);
+        } else {
+          setProjectIdState(null);
         }
+      } else {
+        setWorkspaceIdState(null);
+        setProjectIdState(null);
       }
 
       setMe({

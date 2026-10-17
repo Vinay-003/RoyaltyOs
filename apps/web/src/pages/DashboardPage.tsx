@@ -5,17 +5,18 @@ import { formatMoney, formatTimestamp } from "../lib/format.ts";
 import { TrendingUp, FileText, CheckCircle2, DollarSign, Activity } from "lucide-react";
 
 export function DashboardPage() {
-  const { projectId, currentProject } = useApp();
+  const { projectId, workspaceId, currentProject } = useApp();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!projectId) return;
-    api(`/api/v1/projects/${projectId}/dashboard`)
+    if (!projectId && !workspaceId) return;
+    const target = projectId ? `/api/v1/projects/${projectId}/dashboard` : `/api/v1/insights?workspaceId=${workspaceId}`;
+    api(target)
       .then(setData)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [projectId]);
+  }, [projectId, workspaceId]);
 
   const currency = currentProject?.currency || "USD";
 

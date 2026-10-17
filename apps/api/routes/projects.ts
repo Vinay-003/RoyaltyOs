@@ -24,6 +24,12 @@ export async function handleProjectRoutes(
 
   if (method === "GET" && path === "/api/v1/projects") {
     const p = await principal(ctx, req);
+    const workspaceIdParam = url.searchParams.get("workspaceId");
+    if (workspaceIdParam) {
+      await ctx.repo.requireRole(p.id, workspaceIdParam, ALL_READ_ROLES);
+      json(res, 200, await ctx.supabase.select("projects", { select: "*", workspace_id: `eq.${workspaceIdParam}`, order: "created_at.asc" }));
+      return true;
+    }
     const memberships = await listWorkspaces(ctx, p.id);
     const workspaceIds = memberships.map((m: any) => String(m.workspace_id));
     if (!workspaceIds.length) {
@@ -31,6 +37,25 @@ export async function handleProjectRoutes(
       return true;
     }
     json(res, 200, await ctx.supabase.select("projects", { select: "*", workspace_id: `in.(${workspaceIds.join(",")})`, order: "created_at.asc" }));
+    return true;
+  }
+
+  let match = routeMatch("/api/v1/workspaces/:workspaceId/projects", path);
+  if (match && method === "GET") {
+    const p = await principal(ctx, req);
+    const workspaceId = match.workspaceId!;
+    await ctx.repo.requireRole(p.id, workspaceId, ALL_READ_ROLES);
+    json(res, 200, await ctx.supabase.select("projects", { select: "*", workspace_id: `eq.${workspaceId}`, order: "created_at.asc" }));
+    return true;
+  }
+
+  match = routeMatch("/api/v1/projects/:id", path);
+  if (match && method === "GET") {
+    const p = await principal(ctx, req);
+    const project = (await ctx.supabase.select<Record<string, any>>("projects", { select: "*", id: `eq.${match.id}`, limit: "1" }))[0];
+    if (!project) throw statusError(404, "Project not found");
+    await ctx.repo.requireRole(p.id, String(project.workspace_id), ALL_READ_ROLES);
+    json(res, 200, project);
     return true;
   }
 
@@ -48,11 +73,20 @@ export async function handleProjectRoutes(
 
   if (method === "GET" && path === "/api/v1/beneficiaries") {
     const p = await principal(ctx, req);
-    const projectId = requireString(url.searchParams.get("projectId"), "projectId", 100);
-    const project = await workspaceFromProject(ctx, projectId);
-    await ctx.repo.requireRole(p.id, String(project.workspace_id), ALL_READ_ROLES);
-    json(res, 200, await ctx.supabase.select("beneficiaries", { select: "*", project_id: `eq.${projectId}`, order: "display_name.asc" }));
-    return true;
+    const projectId = url.searchParams.get("projectId");
+    const workspaceId = url.searchParams.get("workspaceId");
+    if (projectId) {
+      const project = await workspaceFromProject(ctx, projectId);
+      await ctx.repo.requireRole(p.id, String(project.workspace_id), ALL_READ_ROLES);
+      json(res, 200, await ctx.supabase.select("beneficiaries", { select: "*", project_id: `eq.${projectId}`, order: "display_name.asc" }));
+      return true;
+    }
+    if (workspaceId) {
+      await ctx.repo.requireRole(p.id, workspaceId, ALL_READ_ROLES);
+      json(res, 200, await ctx.supabase.select("beneficiaries", { select: "*", workspace_id: `eq.${workspaceId}`, order: "display_name.asc" }));
+      return true;
+    }
+    throw statusError(400, "projectId or workspaceId required");
   }
 
   if (method === "POST" && path === "/api/v1/beneficiaries") {
@@ -60,16 +94,19 @@ export async function handleProjectRoutes(
     const projectId = requireString(body.projectId, "projectId", 100);
     const project = await workspaceFromProject(ctx, projectId);
     const { user } = await authorizeWorkspace(ctx, req, String(project.workspace_id), FINANCE_ROLES, true);
-    const beneficiaryKey = requireString(body.beneficiaryKey, "beneficiaryKey", 100).toLowerCase().replace(/[^a-z0-9]+/g, "_");
-    const displayName = requireString(body.displayName, "displayName", 160);
-    const payoutEmail = body.payoutEmail ? requireEmail(body.payoutEmail, "payoutEmail") : null;
+    const rawKey = body.beneficiaryKey ?? body.key ?? body.name;
+    const beneficiaryKey = requireString(rawKey, "beneficiaryKey", 100).toLowerCase().replace(/[^a-z0-9]+/g, "_");
+    const rawName = body.displayName ?? body.name ?? beneficiaryKey;
+    const displayName = requireString(rawName, "displayName", 160);
+    const rawEmail = body.payoutEmail ?? body.email;
+    const payoutEmail = rawEmail ? requireEmail(rawEmail, "payoutEmail") : null;
     const rows = await ctx.supabase.insert<Record<string, any>>("beneficiaries", { workspace_id: project.workspace_id, project_id: projectId, beneficiary_key: beneficiaryKey, display_name: displayName, payout_email: payoutEmail, status: "ACTIVE" });
     await ctx.supabase.rpc("royaltyos_append_audit", { p_workspace_id: project.workspace_id, p_actor_id: user.id, p_action: "BENEFICIARY_CREATED", p_resource_type: "BENEFICIARY", p_resource_id: String(rows[0]?.id), p_detail: `Beneficiary ${beneficiaryKey} created`, p_correlation_id: requestId });
     json(res, 201, rows[0]);
     return true;
   }
 
-  const match = routeMatch("/api/v1/beneficiaries/:id", path);
+  match = routeMatch("/api/v1/beneficiaries/:id", path);
   if (match && method === "PATCH") {
     const auth = await authorizeByResource(ctx, req, "beneficiaries", match.id!, FINANCE_ROLES, true);
     const body = await readJson(req);
