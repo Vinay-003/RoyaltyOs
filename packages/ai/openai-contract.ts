@@ -205,7 +205,7 @@ export async function extractContractWithOpenAI(
     priorDocuments?: Array<{ filename: string; bytes: Uint8Array; documentVersion: number }>;
   },
   fetchImpl: typeof fetch = fetch,
-): Promise<{ extraction: ContractExtraction; model: string; rawResponseId: string | null }> {
+): Promise<{ extraction: ContractExtraction; model: string; rawResponseId: string | null; pages?: Array<{ page: number; text: string }> }> {
   const serverWarnings: string[] = [];
   const readDocument = async (filename: string, bytes: Uint8Array, documentVersion: number) => {
     const { pages, truncated } = await extractPdfPageTexts(bytes, config.ai.maxPdfPages);
@@ -406,7 +406,7 @@ export async function extractContractWithOpenAI(
           conflicts: Array.isArray(parsed.conflicts) ? parsed.conflicts : [],
         } as ContractExtraction;
         for (const warning of serverWarnings) extraction.warnings.push(warning);
-        return { extraction, model, rawResponseId: typeof body.id === "string" ? body.id : null };
+        return { extraction, model, rawResponseId: typeof body.id === "string" ? body.id : null, pages: current.pages };
       };
 
       try {
@@ -450,6 +450,62 @@ export function inferBeneficiaryKey(
   return null;
 }
 
+export function parsePageNumber(rawPage: unknown, rawEvidencePage?: unknown): number | null {
+  const val = rawPage ?? rawEvidencePage;
+  if (typeof val === "number" && Number.isInteger(val) && val > 0) return val;
+  if (typeof val === "string") {
+    const digits = val.replace(/\D/g, "");
+    if (digits) {
+      const parsed = parseInt(digits, 10);
+      if (Number.isInteger(parsed) && parsed > 0 && parsed < 1000) return parsed;
+    }
+  }
+  return null;
+}
+
+export function parseClauseString(rawClause: unknown, rawEvidenceClause?: unknown, rawSection?: unknown): string | null {
+  const val = rawClause ?? rawEvidenceClause ?? rawSection;
+  if (typeof val === "string" && val.trim().length > 0) {
+    const trimmed = val.trim();
+    if (trimmed !== "?" && trimmed.toLowerCase() !== "null" && trimmed.toLowerCase() !== "undefined") {
+      return trimmed;
+    }
+  }
+  return null;
+}
+
+export function inferPageAndClauseFromText(
+  sourceText: string,
+  pages?: Array<{ page: number; text: string }>,
+): { page: number | null; clause: string | null } {
+  if (!sourceText || !pages || pages.length === 0) return { page: null, clause: null };
+  const cleanSnippet = sourceText.replace(/\s+/g, " ").trim().toLowerCase();
+  const searchTerms = [
+    cleanSnippet.slice(0, 60),
+    cleanSnippet.slice(0, 40),
+    cleanSnippet.slice(0, 25),
+  ].filter((s) => s.length >= 8);
+
+  for (const term of searchTerms) {
+    for (const p of pages) {
+      const cleanDocText = p.text.replace(/\s+/g, " ").toLowerCase();
+      if (cleanDocText.includes(term)) {
+        let clause: string | null = null;
+        const lines = p.text.split("\n");
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (/^(?:Section|Clause|Article|\d+\.)\s+[A-Za-z]/i.test(trimmed) && trimmed.length < 80) {
+            clause = trimmed;
+            break;
+          }
+        }
+        return { page: p.page, clause };
+      }
+    }
+  }
+  return { page: null, clause: null };
+}
+
 export function extractionToCandidates(input: {
   extraction: ContractExtraction;
   analysisId: string;
@@ -457,39 +513,51 @@ export function extractionToCandidates(input: {
   documentVersion: number;
   model: string;
   idFactory: () => string;
+  pages?: Array<{ page: number; text: string }>;
 }): CandidateRule[] {
   const conflictedIndexes = new Set<number>();
   for (const conflict of input.extraction.conflicts) {
     if (!conflict.requires_human_resolution) continue;
     for (const index of conflict.rule_indexes) conflictedIndexes.add(index);
   }
-  return input.extraction.rules.map((raw, index) => ({
-    id: input.idFactory(),
-    type: (RULE_TYPES.includes(raw.type) ? raw.type : "UNSUPPORTED") as RuleType | "UNSUPPORTED",
-    beneficiaryKey: normalizeBeneficiaryKey(raw.beneficiary_key)
-      ?? inferBeneficiaryKey(
-        input.extraction.parties,
-        typeof raw.source_text === "string" ? raw.source_text : "",
-        typeof raw.clause === "string" ? raw.clause : null,
-      ),
-    base: ["GROSS_REVENUE","NET_REVENUE","REMAINDER"].includes(raw.base) ? raw.base : "NET_REVENUE",
-    rateBasisPoints: Number.isInteger(raw.rate_basis_points) ? raw.rate_basis_points : null,
-    fixedMinor: Number.isSafeInteger(raw.fixed_minor) ? raw.fixed_minor : null,
-    priority: Number.isInteger(raw.priority) ? raw.priority : (index + 1) * 10,
-    conditions: Array.isArray(raw.conditions) ? raw.conditions as RuleCondition[] : [],
-    config: raw.config && typeof raw.config === "object"
-      ? Object.fromEntries(Object.entries(raw.config).filter(([, value]) => value !== null && value !== undefined))
-      : {},
-    dependencies: Array.isArray(raw.dependencies) ? raw.dependencies.filter((x: unknown) => typeof x === "string") : [],
-    evidence: {
-      sourceDocument: typeof raw.source_document === "string" && raw.source_document.trim() ? raw.source_document : input.documentTitle,
-      sourceVersion: Number.isInteger(raw.source_version) && raw.source_version > 0 ? raw.source_version : input.documentVersion,
-      page: Number.isInteger(raw.page) ? raw.page : null,
-      clause: typeof raw.clause === "string" ? raw.clause : null,
-      sourceText: typeof raw.source_text === "string" ? raw.source_text : "",
-      model: input.model,
-    },
-    confidence: typeof raw.confidence === "number" ? Math.max(0, Math.min(1, raw.confidence)) : 0,
-    status: raw.needs_human_review || raw.type === "UNSUPPORTED" || conflictedIndexes.has(index) ? "REVIEW_REQUIRED" : "PENDING",
-  }));
+  return input.extraction.rules.map((raw, index) => {
+    const rawSourceText = typeof raw.source_text === "string" ? raw.source_text : (typeof raw.evidence?.source_text === "string" ? raw.evidence.source_text : "");
+    const explicitPage = parsePageNumber(raw.page, raw.evidence?.page);
+    const explicitClause = parseClauseString(raw.clause, raw.evidence?.clause, raw.section);
+    const inferred = (!explicitPage || !explicitClause)
+      ? inferPageAndClauseFromText(rawSourceText, input.pages)
+      : { page: null, clause: null };
+    const resolvedPage = explicitPage ?? inferred.page;
+    const resolvedClause = explicitClause ?? inferred.clause;
+
+    return {
+      id: input.idFactory(),
+      type: (RULE_TYPES.includes(raw.type) ? raw.type : "UNSUPPORTED") as RuleType | "UNSUPPORTED",
+      beneficiaryKey: normalizeBeneficiaryKey(raw.beneficiary_key)
+        ?? inferBeneficiaryKey(
+          input.extraction.parties,
+          rawSourceText,
+          resolvedClause,
+        ),
+      base: ["GROSS_REVENUE","NET_REVENUE","REMAINDER"].includes(raw.base) ? raw.base : "NET_REVENUE",
+      rateBasisPoints: Number.isInteger(raw.rate_basis_points) ? raw.rate_basis_points : null,
+      fixedMinor: Number.isSafeInteger(raw.fixed_minor) ? raw.fixed_minor : null,
+      priority: Number.isInteger(raw.priority) ? raw.priority : (index + 1) * 10,
+      conditions: Array.isArray(raw.conditions) ? raw.conditions as RuleCondition[] : [],
+      config: raw.config && typeof raw.config === "object"
+        ? Object.fromEntries(Object.entries(raw.config).filter(([, value]) => value !== null && value !== undefined))
+        : {},
+      dependencies: Array.isArray(raw.dependencies) ? raw.dependencies.filter((x: unknown) => typeof x === "string") : [],
+      evidence: {
+        sourceDocument: typeof raw.source_document === "string" && raw.source_document.trim() ? raw.source_document : input.documentTitle,
+        sourceVersion: Number.isInteger(raw.source_version) && raw.source_version > 0 ? raw.source_version : input.documentVersion,
+        page: resolvedPage,
+        clause: resolvedClause,
+        sourceText: rawSourceText,
+        model: input.model,
+      },
+      confidence: typeof raw.confidence === "number" ? Math.max(0, Math.min(1, raw.confidence)) : 0,
+      status: raw.needs_human_review || raw.type === "UNSUPPORTED" || conflictedIndexes.has(index) ? "REVIEW_REQUIRED" : "PENDING",
+    };
+  });
 }

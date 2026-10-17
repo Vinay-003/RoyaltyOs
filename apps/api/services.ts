@@ -319,6 +319,7 @@ export async function analyzeContractVersion(
     documentVersion: Number(version.version),
     model: result.model,
     idFactory: newId,
+    pages: (result as any).pages,
   });
   if (candidates.length) {
     await ctx.supabase.insert("candidate_rules", candidates.map((r) => ({

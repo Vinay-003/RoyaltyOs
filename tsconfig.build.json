@@ -9,5 +9,5 @@
     "declaration": false,
     "sourceMap": true
   },
-  "exclude": ["tests/**"]
+  "exclude": ["tests/**", "apps/web/**"]
 }

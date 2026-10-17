@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="RoyaltyOS - explainable contract-to-revenue infrastructure powered by AI and PayPal." />
+  <title>RoyaltyOS Operating Console</title>
+  <style>
+    /* Critical path inline CSS for instant sub-200ms FCP */
+    body {
+      margin: 0;
+      background: #080c14;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif;
+    }
+    #app:empty {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #080c14;
+    }
+    #app:empty::after {
+      content: "";
+      width: 24px;
+      height: 24px;
+      border: 2px solid #192338;
+      border-top-color: #2563eb;
+      border-radius: 50%;
+      animation: ros-spin 0.8s linear infinite;
+    }
+    @keyframes ros-spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

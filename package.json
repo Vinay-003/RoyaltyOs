@@ -20,7 +20,8 @@
     "test:unit": "node --experimental-strip-types --test tests/unit/*.test.ts tests/financial/*.test.ts tests/security/*.test.ts tests/ai-redteam/*.test.ts",
     "test:integration": "node --experimental-strip-types --test tests/integration/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && node scripts/copy-web.mjs",
+    "build:client": "vite build",
+    "build": "vite build && rm -rf dist && tsc -p tsconfig.build.json && node scripts/copy-web.mjs",
     "db:check": "node --experimental-strip-types scripts/check-migrations.ts",
     "verify": "npm run typecheck && npm run db:check && npm run security:secret-scan && npm test && npm run build",
     "dev:worker": "node --experimental-strip-types --watch apps/workflows/worker.ts",
@@ -38,11 +39,18 @@
   },
   "devDependencies": {
     "@types/pg": "^8.23.1",
-    "typescript": "5.8.3"
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "5.8.3",
+    "vite": "^8.3.4"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.10",
+    "lucide-react": "^1.59.0",
     "pdfjs-dist": "^6.3.289",
-    "pg": "^8.23.1"
+    "pg": "^8.23.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   }
 }
