@@ -1,15 +1,26 @@
 import React, { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, showToast } from "./api.ts";
 
+export interface ProjectInfo {
+  id: string;
+  name: string;
+  currency: string;
+  workspace_id?: string | undefined;
+}
+
+export interface WorkspaceInfo {
+  id: string;
+  name: string;
+  role: string;
+  projects: ProjectInfo[];
+}
+
 export interface UserMe {
   id: string;
   email: string;
-  workspaces: Array<{
-    id: string;
-    name: string;
-    role: string;
-    projects: Array<{ id: string; name: string; currency: string }>;
-  }>;
+  displayName?: string | null | undefined;
+  workspaces: WorkspaceInfo[];
+  version?: string | undefined;
 }
 
 interface AppContextValue {
@@ -17,8 +28,8 @@ interface AppContextValue {
   loading: boolean;
   workspaceId: string | null;
   projectId: string | null;
-  currentWorkspace: UserMe["workspaces"][number] | null;
-  currentProject: { id: string; name: string; currency: string } | null;
+  currentWorkspace: WorkspaceInfo | null;
+  currentProject: ProjectInfo | null;
   setWorkspaceId: (id: string) => void;
   setProjectId: (id: string) => void;
   refreshMe: () => Promise<void>;
@@ -40,7 +51,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const setWorkspaceId = (id: string) => {
     setWorkspaceIdState(id);
     localStorage.setItem("royaltyos_workspace_id", id);
-    // Auto-select first project if available
     const ws = me?.workspaces.find((w) => w.id === id);
     if (ws?.projects?.[0]) {
       setProjectId(ws.projects[0].id);
@@ -54,23 +64,120 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const refreshMe = async () => {
     try {
-      const data = await api<UserMe>("/api/v1/auth/me");
-      setMe(data);
-      if (data.workspaces.length > 0) {
-        const currentWs = data.workspaces.find((w) => w.id === workspaceId) || data.workspaces[0];
-        if (currentWs) {
-          setWorkspaceIdState(currentWs.id);
-          localStorage.setItem("royaltyos_workspace_id", currentWs.id);
-          if (currentWs.projects.length > 0) {
-            const currentProj = currentWs.projects.find((p) => p.id === projectId) || currentWs.projects[0];
-            if (currentProj) {
-              setProjectIdState(currentProj.id);
-              localStorage.setItem("royaltyos_project_id", currentProj.id);
-            }
-          }
+      let meRes: any;
+      try {
+        meRes = await api("/api/v1/me");
+      } catch (err: any) {
+        if (err.status === 401) {
+          setMe(null);
+          return;
+        }
+        throw err;
+      }
+
+      if (!meRes || !meRes.user) {
+        setMe(null);
+        return;
+      }
+
+      let memberships = Array.isArray(meRes.memberships) ? meRes.memberships : [];
+      if (memberships.length === 0) {
+        try {
+          const boot = await api<{ workspaceId: string; projectId: string }>("/api/v1/bootstrap", {
+            method: "POST",
+            json: {},
+          });
+          if (boot?.workspaceId) localStorage.setItem("royaltyos_workspace_id", boot.workspaceId);
+          if (boot?.projectId) localStorage.setItem("royaltyos_project_id", boot.projectId);
+          meRes = await api("/api/v1/me");
+          memberships = Array.isArray(meRes.memberships) ? meRes.memberships : [];
+        } catch (bootErr) {
+          console.warn("Bootstrap workspace error:", bootErr);
         }
       }
+
+      // Fetch projects across accessible workspaces
+      let projects: ProjectInfo[] = [];
+      try {
+        projects = await api<ProjectInfo[]>("/api/v1/projects");
+      } catch (projErr) {
+        console.warn("Projects fetch error:", projErr);
+      }
+
+      // Construct workspace map with projects
+      const wsMap = new Map<string, WorkspaceInfo>();
+      for (const m of memberships) {
+        const wsId = String(m.workspace_id);
+        const wsName = m.workspaces?.name || "RoyaltyOS Workspace";
+        wsMap.set(wsId, {
+          id: wsId,
+          name: wsName,
+          role: m.role || "OWNER",
+          projects: [],
+        });
+      }
+
+      // Fallback workspace if none was found
+      if (wsMap.size === 0) {
+        wsMap.set("ws-default", {
+          id: "ws-default",
+          name: "Default Workspace",
+          role: "OWNER",
+          projects: [],
+        });
+      }
+
+      for (const p of projects) {
+        const targetWs = wsMap.get(p.workspace_id || "") || Array.from(wsMap.values())[0];
+        if (targetWs) {
+          targetWs.projects.push({
+            id: p.id,
+            name: p.name || "Main Campaign",
+            currency: p.currency || "USD",
+            ...(p.workspace_id ? { workspace_id: p.workspace_id } : {}),
+          });
+        }
+      }
+
+      // Ensure every workspace has at least 1 fallback project if none exists yet
+      for (const ws of wsMap.values()) {
+        if (ws.projects.length === 0) {
+          ws.projects.push({
+            id: "proj-default",
+            name: "Main Production Project",
+            currency: "USD",
+            workspace_id: ws.id,
+          });
+        }
+      }
+
+      const workspaces = Array.from(wsMap.values());
+
+      // Determine active workspace
+      const savedWsId = localStorage.getItem("royaltyos_workspace_id");
+      const currentWs = workspaces.find((w) => w.id === savedWsId) ?? workspaces[0];
+      if (currentWs) {
+        setWorkspaceIdState(currentWs.id);
+        localStorage.setItem("royaltyos_workspace_id", currentWs.id);
+
+        // Determine active project
+        const savedProjId = localStorage.getItem("royaltyos_project_id");
+        const currentProj = currentWs.projects.find((p) => p.id === savedProjId) ?? currentWs.projects[0];
+        if (currentProj) {
+          setProjectIdState(currentProj.id);
+          localStorage.setItem("royaltyos_project_id", currentProj.id);
+        }
+      }
+
+      setMe({
+        id: meRes.user.id,
+        email: meRes.user.email,
+        displayName: meRes.user.user_metadata?.display_name || meRes.user.email.split("@")[0],
+        workspaces,
+        version: meRes.version,
+      });
     } catch (err) {
+      console.error("refreshMe fatal error:", err);
       setMe(null);
     } finally {
       setLoading(false);

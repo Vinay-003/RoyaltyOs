@@ -123,7 +123,7 @@ export async function handleAuthRoutes(
     return true;
   }
 
-  if (method === "GET" && path === "/api/v1/me") {
+  if (method === "GET" && (path === "/api/v1/me" || path === "/api/v1/auth/me")) {
     const p = await principal(ctx, req);
     const memberships = await listWorkspaces(ctx, p.id);
     json(res, 200, { user: p, memberships, version: ctx.config.appVersion });
