@@ -389,3 +389,90 @@ test("extractionToCandidates maps field aliases (payee, rule_type, amount, basis
   assert.equal(candidates[1]!.fixedMinor, 500000);
 });
 
+test("extractionToCandidates drops pipeline formulas, administrative deadlines, and duplicate threshold tiers", () => {
+  const candidates = extractionToCandidates({
+    extraction: {
+      parties: [
+        { name: "Artist", role: "artist", email: null },
+        { name: "Producer", role: "producer", email: null },
+      ],
+      rules: [
+        // 1. Real tiered cumulative rule
+        {
+          type: "TIERED_CUMULATIVE",
+          beneficiary_key: "artist",
+          rate_basis_points: 4600,
+          config: {
+            tiers: [
+              { thresholdMinor: 0, rateBasisPoints: 4600, label: "tier1" },
+              { thresholdMinor: 25000000, rateBasisPoints: 5000, label: "tier2" },
+              { thresholdMinor: 75000000, rateBasisPoints: 5400, label: "tier3" },
+            ],
+          },
+          source_text: "Artist tiers 46% up to $250k, 50% up to $750k, 54% thereafter",
+        },
+        // 2. Redundant duplicate threshold cards (matching rules 15 & 19)
+        {
+          type: "THRESHOLD",
+          beneficiary_key: "artist",
+          rate_basis_points: 5000,
+          source_text: "B_t = $0 and $250,000 <= C_t < $750,000: Artist 50%",
+        },
+        {
+          type: "THRESHOLD",
+          beneficiary_key: "artist",
+          rate_basis_points: 5400,
+          source_text: "B_t = $0 and C_t >= $750,000: Artist 54%",
+        },
+        // 3. Pipeline algebra rules (matching rules 25-28)
+        {
+          type: "UNSUPPORTED",
+          beneficiary_key: "reserve",
+          config: { formula: "max(0, G_t - D_t)" },
+          source_text: "N_t = max(0, G_t - D_t)",
+        },
+        {
+          type: "UNSUPPORTED",
+          beneficiary_key: "reserve",
+          config: { formula: "N_t - H_t + U_t" },
+          source_text: "P_t = N_t - H_t + U_t",
+        },
+        {
+          type: "UNSUPPORTED",
+          beneficiary_key: "reserve",
+          config: { formula: "C_t + Q_t" },
+          source_text: "C_(t+1) = C_t + Q_t",
+        },
+        // 4. Administrative deadline rule (matching rule 30)
+        {
+          type: "DATE_RANGE",
+          beneficiary_key: "artist",
+          source_text: "A statement is issued monthly within 15 calendar days after month-end",
+        },
+        // 5. Carryforward payout threshold (matching rule 29)
+        {
+          type: "FIXED_AMOUNT",
+          beneficiary_key: "artist",
+          fixed_minor: 10000,
+          source_text: "If a party's net payable amount is below $100, that party's amount carries forward",
+        },
+      ],
+      warnings: [],
+      conflicts: [],
+    },
+    analysisId: "a3",
+    documentTitle: "dedup-test.pdf",
+    documentVersion: 1,
+    model: "test-model",
+    idFactory: (() => { let n = 0; return () => `c-${++n}`; })(),
+  });
+
+  // Only the single canonical TIERED_CUMULATIVE rule should remain!
+  // All 2 redundant threshold cards, 3 pipeline formulas, 1 administrative deadline, and 1 carryforward threshold are filtered out!
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]!.type, "TIERED_CUMULATIVE");
+  assert.equal(candidates[0]!.beneficiaryKey, "artist");
+  assert.equal(candidates[0]!.rateBasisPoints, 4600);
+});
+
+

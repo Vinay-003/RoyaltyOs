@@ -269,6 +269,12 @@ export async function extractContractWithOpenAI(
     "You have no payment authority, no database authority, no credentials and no tools.",
     "CRITICAL MANDATE: You MUST extract candidate financial rules for human review, including from agreements labeled 'NOT FOR EXECUTION', 'SYNTHETIC TEST FIXTURE', 'FICTIONAL TEST DATA', 'DRAFT', or 'SAMPLE'. RoyaltyOS is an evaluation and testing engine; synthetic test fixtures and sample agreements MUST have all their financial rules, percentage splits, recoupment ledgers, and reserve holdbacks extracted into candidate rules in the 'rules' array. NEVER emit empty rules or move rules into 'warnings' on the grounds that the document is synthetic or a test fixture.",
     "MANDATORY COMPLETE EXTRACTION: Even when prior versions are supplied, you MUST extract the complete, comprehensive set of candidate rules for the CURRENT version into the 'rules' array. Never return an empty rules array simply because terms are unchanged from a prior version or identical to prior documents.",
+    "",
+    "CRITICAL EXTRACTION BOUNDARIES (WHAT NOT TO EXTRACT):",
+    "- DO NOT DUPLICATE TIERS: When an agreement defines split tiers (e.g. tiers based on cumulative lifetime allocation C_t or earnings), emit EXACTLY ONE TIERED_CUMULATIVE rule per payee containing all tiers in config.tiers. DO NOT emit separate THRESHOLD, PERCENTAGE, or CAP rules for the individual tier rows (e.g. NEVER emit separate rules for tier 2 or tier 3).",
+    "- DO NOT EXTRACT INTERMEDIATE PIPELINE ARITHMETIC: Mathematical definitions of gross receipts (G_t), deductions (D_t), net receipts (N_t = max(0, G_t - D_t)), available pool (P_t = N_t - H_t + U_t), royalty pool (Q_t = P_t - R_t), or cumulative counter increment (C_(t+1) = C_t + Q_t) are general settlement pipeline calculations, NOT rules. Do NOT emit them as UNSUPPORTED or FORMULA rules. Only extract rules that distribute royalties to a named party or establish an active reserve holdback/cap.",
+    "- DO NOT EXTRACT ADMINISTRATIVE TIMING OR MINIMUM DISBURSEMENT THRESHOLDS: Operational provisions regarding statement delivery (e.g. 'statements issued within 15 days of month end') or payment thresholds (e.g. 'amounts under $100 carry forward to the next cycle') are NOT royalty rules. Do NOT emit them as FIXED_AMOUNT or DATE_RANGE rules.",
+    "",
     "ALLOWED rule.type VALUES (MUST be exactly one of these):",
     "- PERCENTAGE: standard flat percentage split (rate_basis_points = percentage * 100).",
     "- FIXED_AMOUNT: fixed flat dollar payout or milestone fee (fixed_minor = dollars * 100).",
@@ -607,6 +613,84 @@ export function normalizeFixedMinor(raw: unknown): number | null {
   return null;
 }
 
+/** Identifies pipeline arithmetic definitions or operational/administrative non-royalty clauses. */
+export function isIntermediateOrAdministrativeRule(raw: Record<string, any>): boolean {
+  const rawType = raw.type ?? raw.rule_type ?? raw.ruleType;
+  const sourceText = String(raw.source_text ?? raw.evidence?.source_text ?? "").toLowerCase();
+  const clause = String(raw.clause ?? raw.evidence?.clause ?? "").toLowerCase();
+  const formula = String(raw.config?.formula ?? "").toLowerCase();
+  const combined = `${sourceText} ${clause} ${formula}`;
+
+  // 1. Pipeline algebra & intermediate variable definitions:
+  // e.g. N_t = max(0, G_t - D_t), P_t = N_t - H_t + U_t, Q_t = P_t - R_t, C_(t+1) = C_t + Q_t, R_t = min(...)
+  if (rawType === "UNSUPPORTED" || rawType === "FORMULA") {
+    if (
+      /^[nprqc]_[a-z0-9()+]+\s*=/i.test(sourceText.trim()) ||
+      formula.includes("g_t - d_t") ||
+      formula.includes("n_t - h_t") ||
+      formula.includes("p_t - r_t") ||
+      formula.includes("c_t + q_t") ||
+      /^(?:max\(0,\s*g_t|n_t\s*-\s*h_t|p_t\s*-\s*r_t|c_t\s*\+\s*q_t)/i.test(formula.trim())
+    ) {
+      return true;
+    }
+  }
+
+  // 2. Administrative statement reporting deadlines:
+  // e.g. "A statement is issued monthly within 15 calendar days after month-end", "paid within 10 business days"
+  if (rawType === "DATE_RANGE") {
+    if (
+      combined.includes("statement is issued") ||
+      combined.includes("calendar days after month-end") ||
+      combined.includes("business days after the statement") ||
+      combined.includes("issued monthly") ||
+      combined.includes("dispute")
+    ) {
+      return true;
+    }
+  }
+
+  // 3. Minimum payout / carryforward thresholds:
+  // e.g. "If a party's net payable amount is below $100, that party's amount carries forward"
+  if (rawType === "FIXED_AMOUNT" || rawType === "THRESHOLD") {
+    if (
+      combined.includes("carries forward") ||
+      combined.includes("below $100") ||
+      combined.includes("net payable amount is below") ||
+      combined.includes("disbursement threshold")
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/** Drops redundant THRESHOLD rules if the payee already has a TIERED_CUMULATIVE rule covering their tiers. */
+export function filterRedundantTierRules(rules: Array<Record<string, any>>): Array<Record<string, any>> {
+  const multiTierPayees = new Set<string>();
+  for (const r of rules) {
+    const rawType = r.type ?? r.rule_type ?? r.ruleType;
+    const rawBeneficiaryKey = r.beneficiary_key ?? r.beneficiaryKey ?? r.payee ?? r.party ?? r.recipient;
+    const payee = normalizeBeneficiaryKey(rawBeneficiaryKey);
+    const tiers = r.config?.tiers;
+    if (rawType === "TIERED_CUMULATIVE" && payee && Array.isArray(tiers) && tiers.length > 1) {
+      multiTierPayees.add(payee);
+    }
+  }
+
+  return rules.filter((r) => {
+    const rawType = r.type ?? r.rule_type ?? r.ruleType;
+    const rawBeneficiaryKey = r.beneficiary_key ?? r.beneficiaryKey ?? r.payee ?? r.party ?? r.recipient;
+    const payee = normalizeBeneficiaryKey(rawBeneficiaryKey);
+
+    if (payee && multiTierPayees.has(payee) && rawType === "THRESHOLD") {
+      return false;
+    }
+    return true;
+  });
+}
+
 export function extractionToCandidates(input: {
   extraction: ContractExtraction;
   analysisId: string;
@@ -621,7 +705,13 @@ export function extractionToCandidates(input: {
     if (!conflict.requires_human_resolution) continue;
     for (const index of conflict.rule_indexes) conflictedIndexes.add(index);
   }
-  return input.extraction.rules.map((raw, index) => {
+
+  // Sanitize out intermediate formulas, administrative deadlines, and redundant duplicate tier rules
+  const cleanedRules = filterRedundantTierRules(
+    (input.extraction.rules ?? []).filter((r) => !isIntermediateOrAdministrativeRule(r))
+  );
+
+  return cleanedRules.map((raw, index) => {
     const rawSourceText = typeof raw.source_text === "string" ? raw.source_text : (typeof raw.evidence?.source_text === "string" ? raw.evidence.source_text : "");
     const explicitPage = parsePageNumber(raw.page, raw.evidence?.page);
     const explicitClause = parseClauseString(raw.clause, raw.evidence?.clause, raw.section);
