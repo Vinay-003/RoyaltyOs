@@ -180,11 +180,57 @@ export function assertVisionSemantics(parsed: Record<string, any>, sourceChars?:
   }
 }
 
+/** Robustly extracts balanced JSON object or array from markdown or prose-wrapped text. */
+export function extractJsonBlock(text: string): string | null {
+  const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (match && match[1]) {
+    const candidate = match[1].trim();
+    if (candidate.startsWith("{") || candidate.startsWith("[")) {
+      return candidate;
+    }
+  }
+  const start = text.search(/[{[]/);
+  if (start !== -1) {
+    const openChar = text[start];
+    const closeChar = openChar === "{" ? "}" : "]";
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let i = start; i < text.length; i++) {
+      const char = text[i];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (char === "\\") {
+        escape = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (!inString) {
+        if (char === openChar) depth++;
+        else if (char === closeChar) {
+          depth--;
+          if (depth === 0) {
+            return text.slice(start, i + 1);
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
 /** Parses model output that may arrive wrapped in fences or prose. Throws on failure. */
 export function parseVisionJson(raw: unknown): Record<string, any> {
   if (typeof raw !== "string" || !raw.trim()) throw new Error("vision model returned an empty reply");
-  const attempts: string[] = [];
   const trimmed = raw.trim();
+  const attempts: string[] = [];
+  const extracted = extractJsonBlock(trimmed);
+  if (extracted) attempts.push(extracted);
   attempts.push(trimmed);
   attempts.push(trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, ""));
   const firstBrace = trimmed.search(/[{[]/);

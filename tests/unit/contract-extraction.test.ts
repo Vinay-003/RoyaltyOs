@@ -154,3 +154,113 @@ test("null model keys fall back to party inference, payee-less rules stay null",
   assert.equal(candidates[0]!.beneficiaryKey, "featured_creator");
   assert.equal(candidates[1]!.beneficiaryKey, null);
 });
+
+test("apinex is selected as priority 1 provider with deepseek flash model", async () => {
+  const requestedUrls: string[] = [];
+  const requestedModels: string[] = [];
+  const userAgents: string[] = [];
+
+  const mockFetch = (async (url: any, init: any) => {
+    requestedUrls.push(String(url));
+    const body = JSON.parse(init.body);
+    requestedModels.push(body.model);
+    userAgents.push(init.headers?.["User-Agent"] ?? "");
+    const reply = JSON.stringify({
+      parties: [{ name: "Producer", role: "producer", email: null }],
+      rules: [{
+        type: "PERCENTAGE", beneficiary_key: "producer", source_version: 1, source_document: "test.pdf",
+        base: "NET_REVENUE", rate_basis_points: 1500, fixed_minor: null, priority: 10,
+        conditions: [], config: {}, dependencies: [], page: 1, clause: "1", source_text: "15% royalty",
+        confidence: 0.95, needs_human_review: false,
+      }],
+      warnings: [], conflicts: [],
+    });
+    return new Response(JSON.stringify({ choices: [{ message: { content: reply } }] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as any;
+
+  const cfg = testConfig({
+    APINEX_API_KEY: "sk-apx-test",
+    GROQ_API_KEY: "gsk-test",
+  });
+
+  const res = await extractContractWithOpenAI(
+    cfg,
+    { filename: "test.pdf", bytes: minimalPdf("Producer gets 15% royalty on net receipts."), documentVersion: 1 },
+    mockFetch,
+  );
+
+  assert.equal(requestedUrls[0], "https://apinex.bond/v1/chat/completions");
+  assert.equal(requestedModels[0], "free/deepseek-v4.1-flash");
+  assert.equal(userAgents[0], "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+  assert.equal(res.extraction.rules.length, 1);
+  assert.equal(res.model, "free/deepseek-v4.1-flash");
+});
+
+test("when apinex and groq fail or return 413, fallback cascades to NVIDIA NIM without repair loops", async () => {
+  const attempts: Array<{ url: string; model: string }> = [];
+
+  const mockFetch = (async (url: any, init: any) => {
+    const body = JSON.parse(init.body);
+    attempts.push({ url: String(url), model: body.model });
+
+    // Apinex primary 500
+    if (body.model === "free/deepseek-v4.1-flash") {
+      return new Response(JSON.stringify({ error: "server error" }), { status: 500 });
+    }
+    // Apinex fallback 500
+    if (body.model === "free/deepseek-v4-flash-0731") {
+      return new Response(JSON.stringify({ error: "gateway error" }), { status: 502 });
+    }
+    // Groq 413 payload too large (tokens per minute exceeded)
+    if (body.model === "openai/gpt-oss-120b" || body.model === "qwen/qwen3.8-27b") {
+      return new Response(JSON.stringify({ error: { message: "Request too large" } }), { status: 413 });
+    }
+    // NVIDIA NIM succeeds with markdown and trailing prose
+    if (body.model === "meta/llama-3.2-11b-vision-instruct") {
+      const validJson = JSON.stringify({
+        parties: [{ name: "Artist", role: "artist", email: null }],
+        rules: [{
+          type: "PERCENTAGE", beneficiary_key: "artist", source_version: 1, source_document: "test.pdf",
+          base: "NET_REVENUE", rate_basis_points: 2000, fixed_minor: null, priority: 10,
+          conditions: [], config: {}, dependencies: [], page: 1, clause: "2", source_text: "20% net",
+          confidence: 0.9, needs_human_review: false,
+        }],
+        warnings: [], conflicts: [],
+      });
+      const proseWrapped = `Here is the extracted contract:\n\`\`\`json\n${validJson}\n\`\`\`\nHope this helps!`;
+      return new Response(JSON.stringify({ choices: [{ message: { content: proseWrapped } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    return new Response(JSON.stringify({ error: "unexpected" }), { status: 400 });
+  }) as any;
+
+  const cfg = testConfig({
+    APINEX_API_KEY: "sk-apx-test",
+    GROQ_API_KEY: "gsk-test",
+    NVIDIA_API_KEY: "nvapi-test",
+  });
+
+  const res = await extractContractWithOpenAI(
+    cfg,
+    { filename: "test.pdf", bytes: minimalPdf("Artist gets 20% of net."), documentVersion: 1 },
+    mockFetch,
+  );
+
+  // Assert cascade order: Apinex (free/deepseek-v4.1-flash) -> Apinex Fallback -> Groq -> Groq Fallback -> NVIDIA NIM
+  assert.equal(attempts.length, 5);
+  assert.equal(attempts[0]!.model, "free/deepseek-v4.1-flash");
+  assert.equal(attempts[1]!.model, "free/deepseek-v4-flash-0731");
+  assert.equal(attempts[2]!.model, "openai/gpt-oss-120b");
+  assert.equal(attempts[3]!.model, "qwen/qwen3.8-27b");
+  assert.equal(attempts[4]!.model, "meta/llama-3.2-11b-vision-instruct");
+  assert.equal(res.model, "meta/llama-3.2-11b-vision-instruct");
+  assert.equal(res.extraction.rules.length, 1);
+  assert.equal(res.extraction.rules[0]!.beneficiary_key, "artist");
+});
+

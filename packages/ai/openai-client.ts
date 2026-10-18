@@ -10,6 +10,8 @@ import { fetchWithRetry } from "../core/http-retry.ts";
  * 5xx still retries inside fetchWithRetry; 429 is excluded there so rotation
  * stays immediate.
  */
+export const BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
 export async function openaiFetch(
   config: AppConfig,
   fetchImpl: typeof fetch,
@@ -27,7 +29,7 @@ export async function openaiFetch(
     const maskedKey = `${key.slice(0, 7)}...${key.slice(-4)}`;
     const startTime = Date.now();
     console.log(`[RoyaltyOS] [INFO] OPENAI_REQUEST_START url=${url} keyIndex=${i} key=${maskedKey}`);
-    const headers = { ...(init.headers as Record<string, string> | undefined), Authorization: `Bearer ${key}` };
+    const headers = { "User-Agent": BROWSER_USER_AGENT, ...(init.headers as Record<string, string> | undefined), Authorization: `Bearer ${key}` };
     const response = await fetchWithRetry(
       fetchImpl,
       url,

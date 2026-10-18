@@ -43,6 +43,12 @@ services:
         sync: false
       - key: PAYPAL_CREDENTIALS_KEY
         sync: false
+      - key: APINEX_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_BASE_URL
@@ -50,7 +56,7 @@ services:
       - key: OPENAI_MODEL
         sync: false
       - key: AI_PROVIDER
-        value: openai
+        value: apinex
       - key: PAYPAL_AI_ENABLED
         value: true
       - key: PAYPAL_MCP_SERVER_URL
