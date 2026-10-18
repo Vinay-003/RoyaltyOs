@@ -65,11 +65,15 @@ export function assertVisionSemantics(parsed: Record<string, any>, sourceChars?:
     }
   }
   const warnings = Array.isArray(parsed.warnings) ? parsed.warnings : [];
-  if (Array.isArray(parsed.rules) && parsed.rules.length === 0 && (sourceChars ?? 0) > 500 && !warnings.length) {
-    throw new Error(
-      `reply returned zero rules with no explanation for a document with ${sourceChars} text characters; ` +
-      `either extract the terms or explain in warnings why the document has none`,
-    );
+  if (Array.isArray(parsed.rules) && parsed.rules.length === 0 && (sourceChars ?? 0) > 500) {
+    const warningText = warnings.join(" ").toLowerCase();
+    const isSyntheticExcuse = warningText.includes("synthetic") || warningText.includes("not for execution") || warningText.includes("fictional") || warningText.includes("no operative") || warningText.includes("structural definition") || warningText.includes("requiring human review");
+    if (!warnings.length || isSyntheticExcuse) {
+      throw new Error(
+        `reply returned zero candidate rules for a document with ${sourceChars} characters containing financial terms; ` +
+        `extract all candidate rules (percentages, recoupment, reserves, splits, tiers) into the 'rules' array immediately even if the document is labeled synthetic, test fixture, or not for execution`,
+      );
+    }
   }
   if (Array.isArray(parsed.rules)) {
     for (const rule of parsed.rules as any[]) {

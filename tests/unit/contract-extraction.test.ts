@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { extractAdvanceMinor, extractContractWithOpenAI, extractionToCandidates, inferBeneficiaryKey, normalizeBeneficiaryKey, normalizeRateBasisPoints, normalizeFixedMinor } from "../../packages/ai/openai-contract.ts";
+import { assertVisionSemantics } from "../../packages/ai/vision-contract.ts";
 
 test("advance figures resolve to minor units, ambiguous text abstains", () => {
   assert.equal(extractAdvanceMinor("The Producer Advance is USD 2,000. It recoups first."), 200000);
@@ -331,5 +332,60 @@ test("extractionToCandidates prevents candidate_rules_rate_basis_points_check vi
       assert.ok(c.rateBasisPoints >= 0 && c.rateBasisPoints <= 10000, `Rate ${c.rateBasisPoints} must be between 0 and 10000`);
     }
   }
+});
+
+test("assertVisionSemantics rejects empty rules with synthetic fixture excuse warnings and triggers repair", () => {
+  // If rules is empty and warning is a synthetic fixture excuse, it must throw to force repair
+  assert.throws(
+    () => {
+      assertVisionSemantics(
+        {
+          rules: [],
+          warnings: ["Document is a SYNTHETIC TEST FIXTURE labeled 'NOT FOR EXECUTION' with fictional test data; no operative financial terms extracted."],
+        },
+        5000,
+      );
+    },
+    /reply returned zero candidate rules/,
+  );
+});
+
+test("extractionToCandidates maps field aliases (payee, rule_type, amount, basis)", () => {
+  const candidates = extractionToCandidates({
+    extraction: {
+      parties: [{ name: "Producer", role: "producer", email: null }],
+      rules: [
+        {
+          rule_type: "RESERVE",
+          payee: "reserve",
+          rate: 800,
+          source_text: "Reserve holdback 8%",
+          basis: "REMAINDER",
+        },
+        {
+          ruleType: "FIXED_AMOUNT",
+          recipient: "producer",
+          amount: 500000,
+          source_text: "Producer bonus $5,000",
+        },
+      ],
+      warnings: [],
+      conflicts: [],
+    },
+    analysisId: "a2",
+    documentTitle: "alias-test.pdf",
+    documentVersion: 1,
+    model: "test-model",
+    idFactory: (() => { let n = 0; return () => `c-${++n}`; })(),
+  });
+
+  assert.equal(candidates[0]!.type, "RESERVE");
+  assert.equal(candidates[0]!.beneficiaryKey, "reserve");
+  assert.equal(candidates[0]!.rateBasisPoints, 800);
+  assert.equal(candidates[0]!.base, "REMAINDER");
+
+  assert.equal(candidates[1]!.type, "FIXED_AMOUNT");
+  assert.equal(candidates[1]!.beneficiaryKey, "producer");
+  assert.equal(candidates[1]!.fixedMinor, 500000);
 });
 
