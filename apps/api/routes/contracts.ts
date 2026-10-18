@@ -197,7 +197,13 @@ export async function handleContractRoutes(
     const base = ["GROSS_REVENUE", "NET_REVENUE", "REMAINDER"].includes(body.base) ? body.base : "REMAINDER";
     const priority = typeof body.priority === "number" ? body.priority : 10;
     const rateBasisPoints = body.rateBasisPoints !== undefined && body.rateBasisPoints !== null ? Number(body.rateBasisPoints) : null;
+    if (rateBasisPoints !== null && (!Number.isInteger(rateBasisPoints) || rateBasisPoints < 0 || rateBasisPoints > 10000)) {
+      throw statusError(400, "rateBasisPoints must be an integer between 0 and 10000 (basis points)");
+    }
     const fixedMinor = body.fixedMinor !== undefined && body.fixedMinor !== null ? Number(body.fixedMinor) : null;
+    if (fixedMinor !== null && (!Number.isSafeInteger(fixedMinor) || fixedMinor < 0)) {
+      throw statusError(400, "fixedMinor must be a non-negative integer");
+    }
     const config = typeof body.config === "object" && body.config !== null ? body.config : {};
     const conditions = Array.isArray(body.conditions) ? body.conditions : [];
     const newRule = {

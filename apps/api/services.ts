@@ -330,15 +330,21 @@ export async function analyzeContractVersion(
       rule_type: r.type,
       beneficiary_key: r.beneficiaryKey,
       base: r.base,
-      rate_basis_points: r.rateBasisPoints,
-      fixed_minor: r.fixedMinor,
-      priority: r.priority,
-      conditions: r.conditions,
-      config: r.config,
-      dependencies: r.dependencies,
+      rate_basis_points: (typeof r.rateBasisPoints === "number" && Number.isInteger(r.rateBasisPoints) && r.rateBasisPoints >= 0 && r.rateBasisPoints <= 10000)
+        ? r.rateBasisPoints
+        : null,
+      fixed_minor: (typeof r.fixedMinor === "number" && Number.isSafeInteger(r.fixedMinor) && r.fixedMinor >= 0)
+        ? r.fixedMinor
+        : null,
+      priority: Number.isInteger(r.priority) ? r.priority : 100,
+      conditions: Array.isArray(r.conditions) ? r.conditions : [],
+      config: typeof r.config === "object" && r.config !== null ? r.config : {},
+      dependencies: Array.isArray(r.dependencies) ? r.dependencies : [],
       evidence: r.evidence,
-      confidence: r.confidence,
-      status: r.status,
+      confidence: (typeof r.confidence === "number" && Number.isFinite(r.confidence))
+        ? Math.max(0, Math.min(1, Math.round(r.confidence * 10000) / 10000))
+        : 0,
+      status: ["PENDING", "APPROVED", "REJECTED", "REVIEW_REQUIRED"].includes(r.status) ? r.status : "REVIEW_REQUIRED",
     })), false);
   }
   logEvent("info", "CANDIDATE_RULES_STORED", {

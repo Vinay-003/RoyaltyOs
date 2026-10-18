@@ -551,6 +551,59 @@ export function inferPageAndClauseFromText(
   return { page: null, clause: null };
 }
 
+export function normalizeRateBasisPoints(raw: unknown): number | null {
+  if (raw === null || raw === undefined) return null;
+  let num: number | null = null;
+  if (typeof raw === "string") {
+    const clean = raw.replace(/%/g, "").trim();
+    const parsed = parseFloat(clean);
+    if (Number.isFinite(parsed)) num = parsed;
+  } else if (typeof raw === "number" && Number.isFinite(raw)) {
+    num = raw;
+  }
+  if (num === null) return null;
+
+  // Decimal rate, e.g. 0.15 -> 1500 bps, 0.08 -> 800 bps
+  if (num > 0 && num <= 1) {
+    num = Math.round(num * 10000);
+  } else if (num > 1 && num <= 100) {
+    // Percentage value, e.g. 15 -> 1500 bps, 20 -> 2000 bps, 12.5 -> 1250 bps
+    num = Math.round(num * 100);
+  } else if (num > 10000 && num <= 100000 && num % 10 === 0) {
+    // Model appended an extra zero (e.g. 60000 for 6000 bps or 20000 for 2000 bps)
+    const scaled = Math.round(num / 10);
+    if (scaled >= 0 && scaled <= 10000) {
+      num = scaled;
+    }
+  }
+
+  const intVal = Math.round(num);
+  // Postgres check constraint: check (rate_basis_points between 0 and 10000)
+  if (intVal >= 0 && intVal <= 10000) {
+    return intVal;
+  }
+  return null;
+}
+
+export function normalizeFixedMinor(raw: unknown): number | null {
+  if (raw === null || raw === undefined) return null;
+  let num: number | null = null;
+  if (typeof raw === "string") {
+    const clean = raw.replace(/[$,]/g, "").trim();
+    const parsed = parseFloat(clean);
+    if (Number.isFinite(parsed)) num = parsed;
+  } else if (typeof raw === "number" && Number.isFinite(raw)) {
+    num = raw;
+  }
+  if (num === null) return null;
+  const intVal = Math.round(num);
+  // Postgres check constraint: check (fixed_minor is null or fixed_minor >= 0)
+  if (Number.isSafeInteger(intVal) && intVal >= 0) {
+    return intVal;
+  }
+  return null;
+}
+
 export function extractionToCandidates(input: {
   extraction: ContractExtraction;
   analysisId: string;
@@ -575,6 +628,16 @@ export function extractionToCandidates(input: {
     const resolvedPage = explicitPage ?? inferred.page;
     const resolvedClause = explicitClause ?? inferred.clause;
 
+    let rateBasisPoints = normalizeRateBasisPoints(raw.rate_basis_points);
+    let fixedMinor = normalizeFixedMinor(raw.fixed_minor);
+
+    // If rate_basis_points was a large number (> 10000) and fixed_minor is null, check if it was actually a fixed amount
+    if (rateBasisPoints === null && fixedMinor === null && typeof raw.rate_basis_points === "number" && raw.rate_basis_points > 10000) {
+      if (raw.type === "FIXED_AMOUNT" || raw.type === "CAP" || raw.type === "FLOOR" || raw.type === "THRESHOLD" || raw.type === "RESERVE" || raw.type === "EXCLUSION") {
+        fixedMinor = normalizeFixedMinor(raw.rate_basis_points);
+      }
+    }
+
     return {
       id: input.idFactory(),
       type: (RULE_TYPES.includes(raw.type) ? raw.type : "UNSUPPORTED") as RuleType | "UNSUPPORTED",
@@ -585,8 +648,8 @@ export function extractionToCandidates(input: {
           resolvedClause,
         ),
       base: ["GROSS_REVENUE","NET_REVENUE","REMAINDER"].includes(raw.base) ? raw.base : "NET_REVENUE",
-      rateBasisPoints: Number.isInteger(raw.rate_basis_points) ? raw.rate_basis_points : null,
-      fixedMinor: Number.isSafeInteger(raw.fixed_minor) ? raw.fixed_minor : null,
+      rateBasisPoints,
+      fixedMinor,
       priority: Number.isInteger(raw.priority) ? raw.priority : (index + 1) * 10,
       conditions: Array.isArray(raw.conditions) ? raw.conditions as RuleCondition[] : [],
       config: raw.config && typeof raw.config === "object"

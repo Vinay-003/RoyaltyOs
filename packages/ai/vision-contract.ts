@@ -1,6 +1,6 @@
 import type { AppConfig } from "../core/config.ts";
 import { openaiFetch } from "./openai-client.ts";
-import { contractSchema, type ContractExtraction } from "./openai-contract.ts";
+import { contractSchema, normalizeRateBasisPoints, type ContractExtraction } from "./openai-contract.ts";
 import { renderPdfPageImages } from "./pdf-image.ts";
 
 export interface VisionExtractionInput {
@@ -107,17 +107,8 @@ export function assertVisionSemantics(parsed: Record<string, any>, sourceChars?:
       }
     }
     // Rate normalization: handle decimal rates (0.15), string percentages ("15%"), integer percentages (15), camelCase (rateBasisPoints), and config rates
-    if (!Number.isInteger(rule?.rate_basis_points)) {
-      let rawRate = rule?.rate_basis_points ?? rule?.rateBasisPoints ?? rule?.rate ?? rule?.percentage ?? rule?.rate_percentage ?? rule?.config?.rate_basis_points ?? rule?.config?.rate;
-      if (typeof rawRate === "string") {
-        const clean = rawRate.replace(/%/g, "").trim();
-        const num = parseFloat(clean);
-        if (Number.isFinite(num)) rawRate = num;
-      }
-      if (typeof rawRate === "number" && Number.isFinite(rawRate) && rawRate > 0) {
-        rule.rate_basis_points = rawRate <= 1 ? Math.round(rawRate * 10000) : rawRate <= 100 ? Math.round(rawRate * 100) : Math.round(rawRate);
-      }
-    }
+    let rawRate = rule?.rate_basis_points ?? rule?.rateBasisPoints ?? rule?.rate ?? rule?.percentage ?? rule?.rate_percentage ?? rule?.config?.rate_basis_points ?? rule?.config?.rate;
+    rule.rate_basis_points = normalizeRateBasisPoints(rawRate);
     if ((rule?.type === "PERCENTAGE" || rule?.type === "REVENUE_CATEGORY") && !Number.isInteger(rule?.rate_basis_points)) {
       if (rule?.fixed_minor != null) {
         rule.type = "FIXED_AMOUNT";
@@ -231,11 +222,11 @@ export function parseVisionJson(raw: unknown): Record<string, any> {
   const attempts: string[] = [];
   const extracted = extractJsonBlock(trimmed);
   if (extracted) attempts.push(extracted);
-  attempts.push(trimmed);
-  attempts.push(trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, ""));
   const firstBrace = trimmed.search(/[{[]/);
   const lastBrace = Math.max(trimmed.lastIndexOf("}"), trimmed.lastIndexOf("]"));
   if (firstBrace >= 0 && lastBrace > firstBrace) attempts.push(trimmed.slice(firstBrace, lastBrace + 1));
+  attempts.push(trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, ""));
+  attempts.push(trimmed);
   let lastError: unknown = null;
   for (const attempt of attempts) {
     try {

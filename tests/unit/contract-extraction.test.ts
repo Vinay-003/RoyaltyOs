@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractAdvanceMinor, extractContractWithOpenAI, extractionToCandidates, inferBeneficiaryKey, normalizeBeneficiaryKey } from "../../packages/ai/openai-contract.ts";
+import { extractAdvanceMinor, extractContractWithOpenAI, extractionToCandidates, inferBeneficiaryKey, normalizeBeneficiaryKey, normalizeRateBasisPoints, normalizeFixedMinor } from "../../packages/ai/openai-contract.ts";
 
 test("advance figures resolve to minor units, ambiguous text abstains", () => {
   assert.equal(extractAdvanceMinor("The Producer Advance is USD 2,000. It recoups first."), 200000);
@@ -262,5 +262,74 @@ test("when apinex and groq fail or return 413, fallback cascades to NVIDIA NIM w
   assert.equal(res.model, "meta/llama-3.2-11b-vision-instruct");
   assert.equal(res.extraction.rules.length, 1);
   assert.equal(res.extraction.rules[0]!.beneficiary_key, "artist");
+});
+
+test("normalizeRateBasisPoints sanitizes all model outputs to strictly [0, 10000] bps", () => {
+  assert.equal(normalizeRateBasisPoints(null), null);
+  assert.equal(normalizeRateBasisPoints(undefined), null);
+  assert.equal(normalizeRateBasisPoints(0), 0);
+  assert.equal(normalizeRateBasisPoints(0.15), 1500);
+  assert.equal(normalizeRateBasisPoints(0.08), 800);
+  assert.equal(normalizeRateBasisPoints("15%"), 1500);
+  assert.equal(normalizeRateBasisPoints("20"), 2000);
+  assert.equal(normalizeRateBasisPoints(2000), 2000);
+  assert.equal(normalizeRateBasisPoints(10000), 10000);
+  // Extra zero scaling: 20000 -> 2000, 60000 -> 6000
+  assert.equal(normalizeRateBasisPoints(20000), 2000);
+  assert.equal(normalizeRateBasisPoints(60000), 6000);
+  // Out of range (money / large numbers / negatives) safely return null to satisfy Postgres check constraint
+  assert.equal(normalizeRateBasisPoints(250000000), null);
+  assert.equal(normalizeRateBasisPoints(3000000), null);
+  assert.equal(normalizeRateBasisPoints(-500), null);
+});
+
+test("extractionToCandidates prevents candidate_rules_rate_basis_points_check violations", () => {
+  const candidates = extractionToCandidates({
+    extraction: {
+      parties: [{ name: "Producer", role: "producer", email: null }],
+      rules: [
+        {
+          type: "PERCENTAGE",
+          beneficiary_key: "producer",
+          rate_basis_points: 60000, // extra zero from model
+          source_text: "Producer gets 60%",
+        },
+        {
+          type: "FIXED_AMOUNT",
+          beneficiary_key: "producer",
+          rate_basis_points: 250000000, // model confused fixed amount ($2,500,000) into rate_basis_points
+          source_text: "Producer fee is $2,500,000",
+        },
+        {
+          type: "RESERVE",
+          beneficiary_key: "reserve",
+          rate_basis_points: -100, // negative value
+          source_text: "Reserve holdback",
+        },
+      ],
+      warnings: [],
+      conflicts: [],
+    },
+    analysisId: "a1",
+    documentTitle: "test.pdf",
+    documentVersion: 1,
+    model: "test-model",
+    idFactory: (() => { let n = 0; return () => `c-${++n}`; })(),
+  });
+
+  // Rule 0: 60000 was scaled to 6000
+  assert.equal(candidates[0]!.rateBasisPoints, 6000);
+  // Rule 1: 250000000 was rejected as rate and recovered into fixedMinor
+  assert.equal(candidates[1]!.rateBasisPoints, null);
+  assert.equal(candidates[1]!.fixedMinor, 250000000);
+  // Rule 2: -100 was rejected as rate
+  assert.equal(candidates[2]!.rateBasisPoints, null);
+
+  // Assert every single candidate satisfies the Postgres check constraint: null or 0..10000
+  for (const c of candidates) {
+    if (c.rateBasisPoints !== null) {
+      assert.ok(c.rateBasisPoints >= 0 && c.rateBasisPoints <= 10000, `Rate ${c.rateBasisPoints} must be between 0 and 10000`);
+    }
+  }
 });
 
