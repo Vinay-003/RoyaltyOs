@@ -712,8 +712,9 @@ export function isIntermediateOrAdministrativeRule(raw: Record<string, any>): bo
   // This describes release timing (U_t), not an active reserve holdback or royalty rule.
   if (
     combined.includes("held cohort releases") ||
-    combined.includes("releases 70% when it reaches") ||
-    (combined.includes("cohort") && combined.includes("calendar days old"))
+    combined.includes("cohort releases") ||
+    (combined.includes("cohort") && combined.includes("calendar days old")) ||
+    (combined.includes("cohort") && combined.includes("releases"))
   ) {
     return true;
   }
@@ -766,15 +767,28 @@ export function filterRedundantTierRules(rules: Array<Record<string, any>>): Arr
     const rawBeneficiaryKey = r.beneficiary_key ?? r.beneficiaryKey ?? r.payee ?? r.party ?? r.recipient;
     const payee = normalizeBeneficiaryKey(rawBeneficiaryKey);
     const category = r.config?.category;
+    const sourceText = String(r.source_text ?? r.evidence?.source_text ?? "").toLowerCase();
+    const clause = String(r.clause ?? r.evidence?.clause ?? "").toLowerCase();
 
     if (payee && multiTierPayees.has(payee)) {
       if (rawType === "THRESHOLD") {
         return false;
       }
       // If the payee already has a TIERED_CUMULATIVE rule, drop flat general PERCENTAGE rules
-      // (such as pre-recoupment matrix split B_t > 0 or redundant tier rows) that lack a specific revenue category
+      // only when they originate from the split matrix / recoupment-state table rows or tier definitions
       if (rawType === "PERCENTAGE" && !category) {
-        return false;
+        const isMatrixOrTierDuplicate =
+          sourceText.includes("b_t >") ||
+          sourceText.includes("b_t =") ||
+          sourceText.includes("recoupment ledger") ||
+          sourceText.includes("split matrix") ||
+          sourceText.includes("recoupment-state") ||
+          clause.includes("split states") ||
+          clause.includes("split matrix") ||
+          clause.includes("tier");
+        if (isMatrixOrTierDuplicate) {
+          return false;
+        }
       }
     }
     return true;
