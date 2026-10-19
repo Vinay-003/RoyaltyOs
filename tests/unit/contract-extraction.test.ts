@@ -457,6 +457,27 @@ test("extractionToCandidates drops pipeline formulas, administrative deadlines, 
           fixed_minor: 10000,
           source_text: "If a party's net payable amount is below $100, that party's amount carries forward",
         },
+        // 6. Redundant pre-recoupment flat percentage rule when TIERED_CUMULATIVE already exists
+        {
+          type: "PERCENTAGE",
+          beneficiary_key: "artist",
+          rate_basis_points: 4000,
+          source_text: "Royalty Pool split matrix: Recoupment Ledger B_t > $0 -> 40%",
+        },
+        // 7. Pipeline recoupment pool cap misclassified as RECOUPMENT
+        {
+          type: "RECOUPMENT",
+          beneficiary_key: "reserve",
+          rate_basis_points: 6000,
+          source_text: "R_t is allocated sequentially in the table order... R_t is defined as the lesser of 60% of P_t and B_t",
+        },
+        // 8. Reserve cohort release schedule misclassified as active RESERVE holdback
+        {
+          type: "RESERVE",
+          beneficiary_key: "reserve",
+          rate_basis_points: 7000,
+          source_text: "Each held cohort releases 70% when it reaches 120 calendar days old and the remaining 30% when it reaches 240 calendar days old",
+        },
       ],
       warnings: [],
       conflicts: [],
@@ -469,7 +490,7 @@ test("extractionToCandidates drops pipeline formulas, administrative deadlines, 
   });
 
   // Only the single canonical TIERED_CUMULATIVE rule should remain!
-  // All 2 redundant threshold cards, 3 pipeline formulas, 1 administrative deadline, and 1 carryforward threshold are filtered out!
+  // All redundant threshold cards, flat percentages, pipeline formulas, recoupment pool caps, cohort releases, deadlines, and carryforward thresholds are filtered out!
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0]!.type, "TIERED_CUMULATIVE");
   assert.equal(candidates[0]!.beneficiaryKey, "artist");

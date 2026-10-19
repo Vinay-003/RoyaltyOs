@@ -271,8 +271,9 @@ export async function extractContractWithOpenAI(
     "MANDATORY COMPLETE EXTRACTION: Even when prior versions are supplied, you MUST extract the complete, comprehensive set of candidate rules for the CURRENT version into the 'rules' array. Never return an empty rules array simply because terms are unchanged from a prior version or identical to prior documents.",
     "",
     "CRITICAL EXTRACTION BOUNDARIES (WHAT NOT TO EXTRACT):",
-    "- DO NOT DUPLICATE TIERS: When an agreement defines split tiers (e.g. tiers based on cumulative lifetime allocation C_t or earnings), emit EXACTLY ONE TIERED_CUMULATIVE rule per payee containing all tiers in config.tiers. DO NOT emit separate THRESHOLD, PERCENTAGE, or CAP rules for the individual tier rows (e.g. NEVER emit separate rules for tier 2 or tier 3).",
-    "- DO NOT EXTRACT INTERMEDIATE PIPELINE ARITHMETIC: Mathematical definitions of gross receipts (G_t), deductions (D_t), net receipts (N_t = max(0, G_t - D_t)), available pool (P_t = N_t - H_t + U_t), royalty pool (Q_t = P_t - R_t), or cumulative counter increment (C_(t+1) = C_t + Q_t) are general settlement pipeline calculations, NOT rules. Do NOT emit them as UNSUPPORTED or FORMULA rules. Only extract rules that distribute royalties to a named party or establish an active reserve holdback/cap.",
+    "- DO NOT DUPLICATE TIERS: When an agreement defines split tiers (e.g. tiers based on cumulative lifetime allocation C_t or earnings), emit EXACTLY ONE TIERED_CUMULATIVE rule per payee containing all tiers in config.tiers. DO NOT emit separate THRESHOLD, PERCENTAGE, or CAP rules for the individual tier rows or pre-recoupment split rows (e.g. NEVER emit separate rules for B_t > $0 or tier 2/3).",
+    "- DO NOT EXTRACT INTERMEDIATE PIPELINE ARITHMETIC: Mathematical definitions of gross receipts (G_t), deductions (D_t), net receipts (N_t = max(0, G_t - D_t)), available pool (P_t = N_t - H_t + U_t), recoupment pool cap (R_t = min(0.60 * P_t, B_t)), royalty pool (Q_t = P_t - R_t), or cumulative counter increment (C_(t+1) = C_t + Q_t) are general settlement pipeline calculations, NOT rules. Do NOT emit them as UNSUPPORTED, FORMULA, or RECOUPMENT rules. Only extract rules that distribute royalties to a named party or establish an active reserve holdback/cap.",
+    "- DO NOT EXTRACT RESERVE RELEASE AGING SCHEDULES: Provisions describing when held reserves mature and release back into the pool (e.g. 'releases 70% at 120 days and 30% at 240 days') are timing schedules, NOT active holdback rules. Only extract the active reserve funding rule (e.g. 8% of N_t up to $30,000 cap).",
     "- DO NOT EXTRACT ADMINISTRATIVE TIMING OR MINIMUM DISBURSEMENT THRESHOLDS: Operational provisions regarding statement delivery (e.g. 'statements issued within 15 days of month end') or payment thresholds (e.g. 'amounts under $100 carry forward to the next cycle') are NOT royalty rules. Do NOT emit them as FIXED_AMOUNT or DATE_RANGE rules.",
     "",
     "ALLOWED rule.type VALUES (MUST be exactly one of these):",
@@ -678,27 +679,46 @@ export function normalizeTiers(rawTiers: unknown): Array<{ tierIndex: number; th
 /** Identifies pipeline arithmetic definitions or operational/administrative non-royalty clauses. */
 export function isIntermediateOrAdministrativeRule(raw: Record<string, any>): boolean {
   const rawType = raw.type ?? raw.rule_type ?? raw.ruleType;
+  const rawBeneficiaryKey = raw.beneficiary_key ?? raw.beneficiaryKey ?? raw.payee ?? raw.party ?? raw.recipient;
+  const payee = normalizeBeneficiaryKey(rawBeneficiaryKey);
   const sourceText = String(raw.source_text ?? raw.evidence?.source_text ?? "").toLowerCase();
   const clause = String(raw.clause ?? raw.evidence?.clause ?? "").toLowerCase();
   const formula = String(raw.config?.formula ?? "").toLowerCase();
   const combined = `${sourceText} ${clause} ${formula}`;
 
   // 1. Pipeline algebra & intermediate variable definitions:
-  // e.g. N_t = max(0, G_t - D_t), P_t = N_t - H_t + U_t, Q_t = P_t - R_t, C_(t+1) = C_t + Q_t, R_t = min(...)
-  if (rawType === "UNSUPPORTED" || rawType === "FORMULA") {
-    if (
-      /^[nprqc]_[a-z0-9()+]+\s*=/i.test(sourceText.trim()) ||
-      formula.includes("g_t - d_t") ||
-      formula.includes("n_t - h_t") ||
-      formula.includes("p_t - r_t") ||
-      formula.includes("c_t + q_t") ||
-      /^(?:max\(0,\s*g_t|n_t\s*-\s*h_t|p_t\s*-\s*r_t|c_t\s*\+\s*q_t)/i.test(formula.trim())
-    ) {
-      return true;
-    }
+  // e.g. N_t = max(0, G_t - D_t), P_t = N_t - H_t + U_t, Q_t = P_t - R_t, C_(t+1) = C_t + Q_t, R_t = min(0.60 * P_t, B_t)
+  if (
+    /^[nprqc]_[a-z0-9()+]+\s*=/i.test(sourceText.trim()) ||
+    combined.includes("r_t = min") ||
+    combined.includes("r_t is defined as the lesser of") ||
+    combined.includes("h_t = min") ||
+    formula.includes("g_t - d_t") ||
+    formula.includes("n_t - h_t") ||
+    formula.includes("p_t - r_t") ||
+    formula.includes("c_t + q_t") ||
+    /^(?:max\(0,\s*g_t|n_t\s*-\s*h_t|p_t\s*-\s*r_t|c_t\s*\+\s*q_t|min\(0\.60\s*\*\s*p_t)/i.test(formula.trim())
+  ) {
+    return true;
   }
 
-  // 2. Administrative statement reporting deadlines:
+  // Recoupment formula definition mislabeled as RECOUPMENT rule with no genuine payee:
+  if (rawType === "RECOUPMENT" && (!payee || payee === "reserve") && (combined.includes("r_t") || combined.includes("lesser of 60%"))) {
+    return true;
+  }
+
+  // 2. Reserve cohort aging / release schedules:
+  // e.g. "Each held cohort releases 70% when it reaches 120 calendar days old and the remaining 30% when it reaches 240 calendar days old"
+  // This describes release timing (U_t), not an active reserve holdback or royalty rule.
+  if (
+    combined.includes("held cohort releases") ||
+    combined.includes("releases 70% when it reaches") ||
+    (combined.includes("cohort") && combined.includes("calendar days old"))
+  ) {
+    return true;
+  }
+
+  // 3. Administrative statement reporting deadlines:
   // e.g. "A statement is issued monthly within 15 calendar days after month-end", "paid within 10 business days"
   if (rawType === "DATE_RANGE") {
     if (
@@ -712,7 +732,7 @@ export function isIntermediateOrAdministrativeRule(raw: Record<string, any>): bo
     }
   }
 
-  // 3. Minimum payout / carryforward thresholds:
+  // 4. Minimum payout / carryforward thresholds:
   // e.g. "If a party's net payable amount is below $100, that party's amount carries forward"
   if (rawType === "FIXED_AMOUNT" || rawType === "THRESHOLD") {
     if (
@@ -728,7 +748,7 @@ export function isIntermediateOrAdministrativeRule(raw: Record<string, any>): bo
   return false;
 }
 
-/** Drops redundant THRESHOLD rules if the payee already has a TIERED_CUMULATIVE rule covering their tiers. */
+/** Drops redundant THRESHOLD and standalone PERCENTAGE rules if the payee already has a TIERED_CUMULATIVE rule covering their tiers. */
 export function filterRedundantTierRules(rules: Array<Record<string, any>>): Array<Record<string, any>> {
   const multiTierPayees = new Set<string>();
   for (const r of rules) {
@@ -745,9 +765,17 @@ export function filterRedundantTierRules(rules: Array<Record<string, any>>): Arr
     const rawType = r.type ?? r.rule_type ?? r.ruleType;
     const rawBeneficiaryKey = r.beneficiary_key ?? r.beneficiaryKey ?? r.payee ?? r.party ?? r.recipient;
     const payee = normalizeBeneficiaryKey(rawBeneficiaryKey);
+    const category = r.config?.category;
 
-    if (payee && multiTierPayees.has(payee) && rawType === "THRESHOLD") {
-      return false;
+    if (payee && multiTierPayees.has(payee)) {
+      if (rawType === "THRESHOLD") {
+        return false;
+      }
+      // If the payee already has a TIERED_CUMULATIVE rule, drop flat general PERCENTAGE rules
+      // (such as pre-recoupment matrix split B_t > 0 or redundant tier rows) that lack a specific revenue category
+      if (rawType === "PERCENTAGE" && !category) {
+        return false;
+      }
     }
     return true;
   });
