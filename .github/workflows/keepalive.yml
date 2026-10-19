@@ -1,0 +1,15 @@
+name: Render Keep Alive
+
+on:
+  schedule:
+    # Run every 10 minutes to prevent Render free-tier idle spin-down (15m idle timeout)
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping RoyaltyOS API
+        run: |
+          curl -s -f --max-time 60 https://royaltyos-api-o45c.onrender.com/api/health || true

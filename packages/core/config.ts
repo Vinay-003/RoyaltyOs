@@ -104,7 +104,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       clamavPort: optionalInt("CLAMAV_PORT", 3310, env),
       corsOrigins: (env.CORS_ORIGINS ?? "")
         .split(",")
-        .map((origin) => origin.trim().replace(/\/$/, ""))
+        .map((origin) => {
+          let s = origin.trim().replace(/\/$/, "");
+          if (s && !s.startsWith("http://") && !s.startsWith("https://") && s.includes(".")) {
+            s = `https://${s}`;
+          }
+          return s;
+        })
         .filter(Boolean),
       paypalCredentialsKey: typeof env.PAYPAL_CREDENTIALS_KEY === "string" && env.PAYPAL_CREDENTIALS_KEY.trim()
         ? env.PAYPAL_CREDENTIALS_KEY.trim()

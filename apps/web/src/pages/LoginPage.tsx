@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useApp } from "../lib/context.tsx";
 import { api, showToast } from "../lib/api.ts";
-import { Lock, Mail, User, Eye, EyeOff, ArrowRight, ShieldCheck, Sparkles, CheckCircle2 } from "lucide-react";
+import { Lock, Mail, User, Eye, EyeOff, ArrowRight, ShieldCheck, Sparkles, CheckCircle2, Server } from "lucide-react";
 
 export function LoginPage({ onLoginSuccess }: { onLoginSuccess: () => void }) {
   const { refreshMe } = useApp();
@@ -19,7 +19,37 @@ export function LoginPage({ onLoginSuccess }: { onLoginSuccess: () => void }) {
   const [signupSuccessNotice, setSignupSuccessNotice] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
+  const [wakingUp, setWakingUp] = useState(false);
+  const [serverStatus, setServerStatus] = useState<"online" | "waking" | "checking">("checking");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const checkHealth = async () => {
+      try {
+        const res = await fetch("/api/health", { cache: "no-store" });
+        if (active) {
+          setServerStatus(res.ok ? "online" : "waking");
+        }
+      } catch {
+        if (active) setServerStatus("waking");
+      }
+    };
+    checkHealth();
+
+    const handleServerStatus = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (active && detail?.status) {
+        setServerStatus(detail.status);
+      }
+    };
+    window.addEventListener("royaltyos:server-status", handleServerStatus);
+
+    return () => {
+      active = false;
+      window.removeEventListener("royaltyos:server-status", handleServerStatus);
+    };
+  }, []);
 
   const friendlyError = (err: any) => {
     const status = err?.status;
@@ -33,6 +63,9 @@ export function LoginPage({ onLoginSuccess }: { onLoginSuccess: () => void }) {
     if (status === 429) {
       return "Too many requests. Please wait a moment and try again.";
     }
+    if (status === 502 || status === 503 || status === 504) {
+      return "The cloud server on Render is waking up from idle (takes ~45–60s). Please wait a moment while it finishes booting, then try again.";
+    }
     return err?.message || "An unexpected error occurred during authentication.";
   };
 
@@ -42,10 +75,30 @@ export function LoginPage({ onLoginSuccess }: { onLoginSuccess: () => void }) {
     setLoading(true);
     setErrorMessage(null);
     try {
-      const res = await api("/api/v1/auth/login", {
-        method: "POST",
-        json: { email: email.trim(), password },
-      }, false);
+      let res;
+      try {
+        res = await api("/api/v1/auth/login", {
+          method: "POST",
+          json: { email: email.trim(), password },
+          maxRetries: 1,
+        }, false);
+      } catch (firstErr: any) {
+        if (firstErr?.status === 502 || firstErr?.status === 503 || firstErr?.status === 504) {
+          setWakingUp(true);
+          setServerStatus("waking");
+          showToast("Cloud server is waking up from idle. Connecting...", "warn");
+          // Retry with gateway backoff
+          res = await api("/api/v1/auth/login", {
+            method: "POST",
+            json: { email: email.trim(), password },
+            maxRetries: 6,
+          }, false);
+          setWakingUp(false);
+          setServerStatus("online");
+        } else {
+          throw firstErr;
+        }
+      }
 
       if (res.bootstrap?.workspaceId) {
         localStorage.setItem("royaltyos_workspace_id", res.bootstrap.workspaceId);
@@ -63,6 +116,7 @@ export function LoginPage({ onLoginSuccess }: { onLoginSuccess: () => void }) {
       showToast(msg, "error");
     } finally {
       setLoading(false);
+      setWakingUp(false);
     }
   };
 
@@ -169,6 +223,36 @@ export function LoginPage({ onLoginSuccess }: { onLoginSuccess: () => void }) {
             </p>
           </div>
         </div>
+
+        {/* Server waking banner */}
+        {serverStatus === "waking" && (
+          <div
+            style={{
+              padding: "8px 12px",
+              background: "rgba(245, 158, 11, 0.12)",
+              border: "1px solid rgba(245, 158, 11, 0.28)",
+              borderRadius: 8,
+              color: "#fbbf24",
+              fontSize: 12,
+              marginBottom: 18,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: "#fbbf24",
+                boxShadow: "0 0 8px #fbbf24",
+                flexShrink: 0,
+              }}
+            />
+            <span>Cloud backend is waking from idle (Render cold start)... connecting automatically.</span>
+          </div>
+        )}
 
         {/* Tab switcher: Sign In vs Create Account */}
         <div
@@ -381,7 +465,7 @@ export function LoginPage({ onLoginSuccess }: { onLoginSuccess: () => void }) {
                       display: "inline-block",
                     }}
                   />
-                  <span>Authenticating...</span>
+                  <span>{wakingUp ? "Waking Cloud Server (~30s)..." : "Authenticating..."}</span>
                 </>
               ) : (
                 <>

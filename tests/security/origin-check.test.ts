@@ -12,9 +12,11 @@ test("canonical app origin may mutate, unknown origins are blocked", () => {
 test("CORS_ORIGINS allowlists extra frontends such as a custom domain", () => {
   const config = testConfig({
     APP_BASE_URL: "https://royaltyos.vinaybuilds.me/",
-    CORS_ORIGINS: "https://royaltyos-api.onrender.com/, not-a-url",
+    CORS_ORIGINS: "https://royaltyos-api.onrender.com/, not-a-url, public-jjeufeiov-vinay-003s-projects.vercel.app",
   });
   assert.equal(isAllowedOrigin(config, "https://royaltyos.vinaybuilds.me"), true);
   assert.equal(isAllowedOrigin(config, "https://royaltyos-api.onrender.com"), true);
+  assert.equal(isAllowedOrigin(config, "https://public-jjeufeiov-vinay-003s-projects.vercel.app"), true);
   assert.equal(isAllowedOrigin(config, "https://evil.example.com"), false);
 });
+

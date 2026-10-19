@@ -80,11 +80,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const refreshMe = async () => {
     try {
+      const hasPriorSession = localStorage.getItem("royaltyos_has_session") === "true";
       let meRes: any;
       try {
-        meRes = await api("/api/v1/me");
+        meRes = await api("/api/v1/me", { maxRetries: hasPriorSession ? 5 : 1 });
       } catch (err: any) {
-        if (err.status === 401) {
+        if (err.status === 401 || err.status === 502 || err.status === 503 || err.status === 504) {
           setMe(null);
           return;
         }
@@ -95,6 +96,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setMe(null);
         return;
       }
+      localStorage.setItem("royaltyos_has_session", "true");
 
       let memberships = Array.isArray(meRes.memberships) ? meRes.memberships : [];
       if (memberships.length === 0) {
@@ -212,6 +214,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await api("/api/v1/auth/logout", { method: "POST" });
     } catch {}
     setMe(null);
+    localStorage.removeItem("royaltyos_has_session");
     localStorage.removeItem("royaltyos_workspace_id");
     localStorage.removeItem("royaltyos_project_id");
     showToast("Signed out successfully", "info");
@@ -221,6 +224,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     refreshMe();
     const handleExpired = () => {
       setMe(null);
+      localStorage.removeItem("royaltyos_has_session");
       showToast("Session expired. Please sign in again.", "warn");
     };
     window.addEventListener("royaltyos:session-expired", handleExpired);

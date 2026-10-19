@@ -3,6 +3,7 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface ApiOptions extends RequestInit {
   json?: unknown;
+  maxRetries?: number;
 }
 
 export type ToastListener = (message: string, type?: "info" | "success" | "error" | "warn") => void;
@@ -29,14 +30,24 @@ async function promptStepUpPassword(): Promise<string | null> {
   return prompt("This financial action requires recent password verification. Enter your password:");
 }
 
-async function requestWithGatewayRetry(url: string, options: RequestInit): Promise<Response> {
+async function requestWithGatewayRetry(url: string, options: RequestInit, maxRetries = 5): Promise<Response> {
   let last: Response | undefined;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    last = await fetch(url, { ...options, credentials: "same-origin" });
-    if (!GATEWAY_STATUSES.has(last.status)) return last;
-    showToast("RoyaltyOS is waking server from idle (cold start). Retrying...", "warn");
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      last = await fetch(url, { ...options, credentials: "same-origin" });
+    } catch (fetchErr) {
+      if (attempt === maxRetries - 1) throw fetchErr;
+    }
+    if (last && !GATEWAY_STATUSES.has(last.status)) {
+      window.dispatchEvent(new CustomEvent("royaltyos:server-status", { detail: { status: "online" } }));
+      return last;
+    }
+    window.dispatchEvent(new CustomEvent("royaltyos:server-status", { detail: { status: "waking" } }));
     if (attempt === 0) fetch("/api/health", { cache: "no-store" }).catch(() => {});
-    await delay(attempt < 2 ? 4000 : 8000);
+    if (maxRetries > 1) {
+      showToast("RoyaltyOS is waking server from idle (cold start). Retrying...", "warn");
+      await delay(attempt < 2 ? 3000 : 6000);
+    }
   }
   return last!;
 }
@@ -51,7 +62,7 @@ export async function api<T = any>(url: string, options: ApiOptions = {}, retry 
     fetchOptions.body = options.body;
   }
 
-  const response = await requestWithGatewayRetry(url, fetchOptions);
+  const response = await requestWithGatewayRetry(url, fetchOptions, options.maxRetries);
   const contentType = response.headers.get("content-type") || "";
   let data: any;
   if (contentType.includes("application/json")) {
