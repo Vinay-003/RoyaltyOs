@@ -39,10 +39,11 @@ export function LoginPage({ onLoginSuccess }: { onLoginSuccess: () => void }) {
   const [serverStatus, setServerStatus] = useState<"online" | "waking" | "checking">("checking");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Continuous background health polling with automatic online detection
+  // One-time / waking-only health check (strictly stops once online to preserve Render free hours)
   useEffect(() => {
     let active = true;
     let timer: any = null;
+    let attempts = 0;
 
     const poll = async () => {
       try {
@@ -51,15 +52,18 @@ export function LoginPage({ onLoginSuccess }: { onLoginSuccess: () => void }) {
         if (res.ok) {
           setServerStatus("online");
           setWakingUp(false);
-          // When warm, check every 30s to keep liveness
-          timer = setTimeout(poll, 30000);
+          // STOP polling immediately once online: never keep Render instance warm unnecessarily
+          return;
         } else {
+          attempts++;
+          if (attempts > 30) return; // Stop after ~75s
           setServerStatus("waking");
-          // When waking, poll actively every 2.5s
           timer = setTimeout(poll, 2500);
         }
       } catch {
         if (!active) return;
+        attempts++;
+        if (attempts > 30) return; // Stop after ~75s
         setServerStatus("waking");
         timer = setTimeout(poll, 2500);
       }
