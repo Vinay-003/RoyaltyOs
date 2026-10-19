@@ -17,6 +17,10 @@ const INSERT_CRON = "0 0 */3 * *";
 const CLEANUP_CRON = "5 0 */3 * *";
 const CRON_SOURCE = "cloudflare-cron";
 
+function getSupabaseSecretKey(env) {
+  return env.SUPABASE_SECRET_KEY || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_KEY || "";
+}
+
 export default {
   /**
    * Cloudflare scheduled cron triggers.
@@ -72,7 +76,7 @@ export default {
         worker: "royaltyos-supabase-keepalive",
         environment: {
           SUPABASE_URL_SET: Boolean(env.SUPABASE_URL),
-          SUPABASE_SECRET_KEY_SET: Boolean(env.SUPABASE_SECRET_KEY),
+          SUPABASE_SECRET_KEY_SET: Boolean(getSupabaseSecretKey(env)),
           MANUAL_TRIGGER_TOKEN_SET: Boolean(env.MANUAL_TRIGGER_TOKEN),
         },
         schedules: {
@@ -331,14 +335,15 @@ async function cleanupLatestKeepalive(env, source) {
 }
 
 function buildSupabaseHeaders(env, extraHeaders = {}) {
+  const secretKey = getSupabaseSecretKey(env);
   const headers = {
-    apikey: env.SUPABASE_SECRET_KEY,
+    apikey: secretKey,
     "Content-Type": "application/json",
     ...extraHeaders,
   };
 
-  if (!env.SUPABASE_SECRET_KEY.startsWith("sb_secret_")) {
-    headers.Authorization = `Bearer ${env.SUPABASE_SECRET_KEY}`;
+  if (!secretKey.startsWith("sb_secret_")) {
+    headers.Authorization = `Bearer ${secretKey}`;
   }
 
   return headers;
@@ -346,7 +351,7 @@ function buildSupabaseHeaders(env, extraHeaders = {}) {
 
 function validateSupabaseConfig(env) {
   if (!env.SUPABASE_URL) return "SUPABASE_URL is not configured";
-  if (!env.SUPABASE_SECRET_KEY) return "SUPABASE_SECRET_KEY is not configured";
+  if (!getSupabaseSecretKey(env)) return "SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY) is not configured";
   return null;
 }
 
