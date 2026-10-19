@@ -261,7 +261,7 @@ export async function extractContractWithOpenAI(
   }
   content.push({
     type: "input_text",
-    text: `The following contract text is the CURRENT contract version ${input.documentVersion}. Extract all revenue-sharing, royalty, advance, recoupment, waterfall, split, reserve, and fee terms described in CURRENT contract version ${input.documentVersion} as candidate financial rules for human review, including in test fixtures and agreements labeled 'NOT FOR EXECUTION'. Extract ALL rules into the 'rules' array, even if identical to prior versions. Compare it against supplied prior versions. Include exact source_version, source_document, page/clause evidence. If an amendment supersedes an earlier clause, surface the relationship in conflicts. Do not calculate a payout. Key formatting rules: beneficiary_key MUST be the snake_case payee name (Artist→artist, Featured Creator→featured_creator); use 'reserve' for remainder rules and null ONLY for rules with no payee. A rate that applies to one revenue category MUST use type REVENUE_CATEGORY with config.category (never PERCENTAGE with a category). Never emit EXCLUSION without an explicit amountMinor. Money math: advanceMinor and fixedMinor are INTEGER minor units, i.e. dollars × 100 exactly (USD 2,000 → 200000; USD 15,000 → 1500000; never append an extra zero). Never put a recoupment_remaining condition on a RECOUPMENT rule: the engine already selects pre/post rates from the remaining balance, and such a condition deletes the payee's share the instant the advance hits zero.\n\n${currentBlock}`,
+    text: `The following contract text is the CURRENT contract version ${input.documentVersion}. Extract all revenue-sharing, royalty, advance, recoupment, waterfall, split, reserve, and fee terms described in CURRENT contract version ${input.documentVersion} as candidate financial rules for human review, including in test fixtures and agreements labeled 'NOT FOR EXECUTION'. Extract ALL rules into the 'rules' array, even if identical to prior versions. Compare it against supplied prior versions. Include exact source_version, source_document, page/clause evidence. If an amendment supersedes an earlier clause, surface the relationship in conflicts. Do not calculate a payout. Key formatting rules: beneficiary_key MUST be the snake_case payee name (Artist→artist, Featured Creator→featured_creator); use 'reserve' for remainder rules and null ONLY for rules with no payee. A rate that applies to one revenue category MUST use type REVENUE_CATEGORY with config.category (never PERCENTAGE with a category). Never emit EXCLUSION without an explicit amountMinor. Money math: All monetary amounts (advanceMinor, fixedMinor, capMinor, floorMinor, amountMinor, thresholdMinor) are INTEGER minor units, i.e. dollars × 100 exactly (USD 2,000 → 200000; USD 15,000 → 1500000; USD 250,000 → 25000000; USD 750,000 → 75000000; NEVER append an extra zero, NEVER multiply by 1000). For TIERED_CUMULATIVE rules, thresholdMinor is the tier upper ceiling in cents; the final tier covering all earnings above the last threshold MUST have thresholdMinor: null. Never put a recoupment_remaining condition on a RECOUPMENT rule: the engine already selects pre/post rates from the remaining balance, and such a condition deletes the payee's share the instant the advance hits zero.\n\n${currentBlock}`,
   });
   const baseInstructions = [
     "You are RoyaltyOS Contract Intelligence.",
@@ -279,7 +279,7 @@ export async function extractContractWithOpenAI(
     "- PERCENTAGE: standard flat percentage split (rate_basis_points = percentage * 100).",
     "- FIXED_AMOUNT: fixed flat dollar payout or milestone fee (fixed_minor = dollars * 100).",
     "- RECOUPMENT: advance against earnings or priority credit recovery; specify config.advanceMinor, preRecoupmentBasisPoints, postRecoupmentBasisPoints, priorityValue.",
-    "- TIERED_CUMULATIVE: rate changes after cumulative threshold; config.tiers = [{ thresholdMinor, rateBasisPoints, label }].",
+    "- TIERED_CUMULATIVE: rate changes after cumulative threshold; config.tiers = [{ tierIndex, thresholdMinor, rateBasisPoints, label }]. thresholdMinor is the tier upper ceiling in minor units (dollars * 100, e.g. $250,000 is 25000000; $750,000 is 75000000; NEVER append an extra zero). The final open-ended tier MUST have thresholdMinor: null.",
     "- DERIVATIVE_SPLIT: split derived from a parent payee's earnings; config.parentRuleId.",
     "- REVENUE_CATEGORY: rate applies to a specific revenue category (e.g. streaming, synch, physical); config.category.",
     "- CAP: maximum ceiling on payout; config.capMinor.",
@@ -295,7 +295,7 @@ export async function extractContractWithOpenAI(
     "Do NOT invent new rule types. If unsure, use UNSUPPORTED with needs_human_review: true.",
     "Never invent a missing term. Unsupported or ambiguous clauses must be marked for human review.",
     "Detect contradictions, amendments and superseding language across every supplied contract version and surface them in conflicts.",
-    "Use integer basis points for percentages (e.g. 40% -> 4000, 8% -> 800) and integer minor units for money when amounts are explicit (e.g. $15,000 -> 1500000, $45,000 -> 4500000).",
+    "Use integer basis points for percentages (e.g. 40% -> 4000, 8% -> 800) and integer minor units for money when amounts are explicit (dollars * 100, e.g. $15,000 -> 1500000, $45,000 -> 4500000, $250,000 -> 25000000; never append an extra zero).",
     "For recoupment rules, put advanceMinor, preRecoupmentBasisPoints and postRecoupmentBasisPoints into config when present.",
     "For category rules, put category into config. For caps/floors/thresholds, put targetRuleId/amountMinor fields into config when inferable.",
     "For DATE_RANGE and PRIORITY modifiers, use targetRuleId only when the target is unambiguous; otherwise keep the financial rule itself review-required. Use priorityValue for an explicit contractual priority number.",
@@ -613,6 +613,68 @@ export function normalizeFixedMinor(raw: unknown): number | null {
   return null;
 }
 
+/** Sanitizes cumulative tiers, correcting 10x zero mistakes from LLMs and nulling out open-ended final tiers. */
+export function normalizeTiers(rawTiers: unknown): Array<{ tierIndex: number; thresholdMinor: number | null; rateBasisPoints: number; label: string | null }> | null {
+  if (!Array.isArray(rawTiers) || rawTiers.length === 0) return null;
+  const tiers = rawTiers.map((t: any, idx: number) => {
+    let rate = normalizeRateBasisPoints(t.rateBasisPoints ?? t.rate_basis_points ?? t.rate);
+    let thresh: number | null = null;
+    const rawThresh = t.thresholdMinor ?? t.threshold_minor ?? t.threshold;
+    if (rawThresh !== null && rawThresh !== undefined) {
+      if (typeof rawThresh === "string") {
+        const clean = rawThresh.replace(/[$,]/g, "").trim();
+        const p = parseFloat(clean);
+        if (Number.isFinite(p)) thresh = Math.round(p);
+      } else if (typeof rawThresh === "number" && Number.isFinite(rawThresh)) {
+        thresh = Math.round(rawThresh);
+      }
+    }
+    const label = typeof t.label === "string" ? t.label.trim() : null;
+
+    // Detect extra zero (10x or 100x error) by cross-referencing text in label
+    // e.g. label mentions "$250,000", "$250k", or "250,000", but thresh was output as 250,000,000 ($2.5M)
+    if (thresh !== null && thresh > 0 && label) {
+      const matches = [...label.matchAll(/\$?([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+(?:\.[0-9]{2})?|[0-9]+k)/gi)];
+      if (matches.length > 0) {
+        let maxDollar = 0;
+        for (const m of matches) {
+          const s = m[1].toLowerCase().replace(/,/g, "");
+          const val = s.endsWith("k") ? parseFloat(s.slice(0, -1)) * 1000 : parseFloat(s);
+          if (val > maxDollar) maxDollar = val;
+        }
+        if (maxDollar > 0) {
+          const expectedMinor = Math.round(maxDollar * 100);
+          if (thresh === expectedMinor * 10 || thresh === expectedMinor * 100) {
+            thresh = expectedMinor;
+          }
+        }
+      }
+    }
+
+    return {
+      tierIndex: Number.isInteger(t.tierIndex) ? t.tierIndex : idx,
+      thresholdMinor: thresh,
+      rateBasisPoints: rate ?? 0,
+      label,
+    };
+  });
+
+  // Sanitize last tier: if last tier threshold is <= previous tier (duplicated upper bound) or open-ended, threshold is null (infinity)
+  if (tiers.length > 1) {
+    const last = tiers[tiers.length - 1];
+    const prev = tiers[tiers.length - 2];
+    if (last && prev) {
+      if (last.thresholdMinor !== null && prev.thresholdMinor !== null && last.thresholdMinor <= prev.thresholdMinor) {
+        last.thresholdMinor = null;
+      } else if (last.label && />=|thereafter|above|\+/i.test(last.label)) {
+        last.thresholdMinor = null;
+      }
+    }
+  }
+
+  return tiers;
+}
+
 /** Identifies pipeline arithmetic definitions or operational/administrative non-royalty clauses. */
 export function isIntermediateOrAdministrativeRule(raw: Record<string, any>): boolean {
   const rawType = raw.type ?? raw.rule_type ?? raw.ruleType;
@@ -752,7 +814,10 @@ export function extractionToCandidates(input: {
       priority: Number.isInteger(raw.priority) ? raw.priority : (index + 1) * 10,
       conditions: Array.isArray(raw.conditions) ? raw.conditions as RuleCondition[] : [],
       config: raw.config && typeof raw.config === "object"
-        ? Object.fromEntries(Object.entries(raw.config).filter(([, value]) => value !== null && value !== undefined))
+        ? {
+            ...Object.fromEntries(Object.entries(raw.config).filter(([, value]) => value !== null && value !== undefined)),
+            ...(Array.isArray(raw.config.tiers) ? { tiers: normalizeTiers(raw.config.tiers) } : {}),
+          }
         : {},
       dependencies: Array.isArray(raw.dependencies) ? raw.dependencies.filter((x: unknown) => typeof x === "string") : [],
       evidence: {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractAdvanceMinor, extractContractWithOpenAI, extractionToCandidates, inferBeneficiaryKey, normalizeBeneficiaryKey, normalizeRateBasisPoints, normalizeFixedMinor } from "../../packages/ai/openai-contract.ts";
+import { extractAdvanceMinor, extractContractWithOpenAI, extractionToCandidates, inferBeneficiaryKey, normalizeBeneficiaryKey, normalizeRateBasisPoints, normalizeFixedMinor, normalizeTiers } from "../../packages/ai/openai-contract.ts";
 import { assertVisionSemantics } from "../../packages/ai/vision-contract.ts";
 
 test("advance figures resolve to minor units, ambiguous text abstains", () => {
@@ -156,7 +156,7 @@ test("null model keys fall back to party inference, payee-less rules stay null",
   assert.equal(candidates[1]!.beneficiaryKey, null);
 });
 
-test("apinex is selected as priority 1 provider with deepseek flash model", async () => {
+test("apinex is selected as priority 1 provider with deepseek pro model", async () => {
   const requestedUrls: string[] = [];
   const requestedModels: string[] = [];
   const userAgents: string[] = [];
@@ -194,10 +194,10 @@ test("apinex is selected as priority 1 provider with deepseek flash model", asyn
   );
 
   assert.equal(requestedUrls[0], "https://apinex.bond/v1/chat/completions");
-  assert.equal(requestedModels[0], "free/deepseek-v4.1-flash");
+  assert.equal(requestedModels[0], "free/deepseek-v4-pro-0813");
   assert.equal(userAgents[0], "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
   assert.equal(res.extraction.rules.length, 1);
-  assert.equal(res.model, "free/deepseek-v4.1-flash");
+  assert.equal(res.model, "free/deepseek-v4-pro-0813");
 });
 
 test("when apinex and groq fail or return 413, fallback cascades to NVIDIA NIM without repair loops", async () => {
@@ -208,11 +208,11 @@ test("when apinex and groq fail or return 413, fallback cascades to NVIDIA NIM w
     attempts.push({ url: String(url), model: body.model });
 
     // Apinex primary 500
-    if (body.model === "free/deepseek-v4.1-flash") {
+    if (body.model === "free/deepseek-v4-pro-0813") {
       return new Response(JSON.stringify({ error: "server error" }), { status: 500 });
     }
     // Apinex fallback 500
-    if (body.model === "free/deepseek-v4-flash-0731") {
+    if (body.model === "free/qwen-3.8-max") {
       return new Response(JSON.stringify({ error: "gateway error" }), { status: 502 });
     }
     // Groq 413 payload too large (tokens per minute exceeded)
@@ -253,16 +253,17 @@ test("when apinex and groq fail or return 413, fallback cascades to NVIDIA NIM w
     mockFetch,
   );
 
-  // Assert cascade order: Apinex (free/deepseek-v4.1-flash) -> Apinex Fallback -> Groq -> Groq Fallback -> NVIDIA NIM
+  // Assert cascade order: Apinex (free/deepseek-v4-pro-0813) -> Apinex Fallback (free/qwen-3.8-max) -> Groq -> Groq Fallback -> NVIDIA NIM
   assert.equal(attempts.length, 5);
-  assert.equal(attempts[0]!.model, "free/deepseek-v4.1-flash");
-  assert.equal(attempts[1]!.model, "free/deepseek-v4-flash-0731");
+  assert.equal(attempts[0]!.model, "free/deepseek-v4-pro-0813");
+  assert.equal(attempts[1]!.model, "free/qwen-3.8-max");
   assert.equal(attempts[2]!.model, "openai/gpt-oss-120b");
   assert.equal(attempts[3]!.model, "qwen/qwen3.8-27b");
   assert.equal(attempts[4]!.model, "meta/llama-3.2-11b-vision-instruct");
   assert.equal(res.model, "meta/llama-3.2-11b-vision-instruct");
   assert.equal(res.extraction.rules.length, 1);
   assert.equal(res.extraction.rules[0]!.beneficiary_key, "artist");
+
 });
 
 test("normalizeRateBasisPoints sanitizes all model outputs to strictly [0, 10000] bps", () => {
@@ -473,6 +474,23 @@ test("extractionToCandidates drops pipeline formulas, administrative deadlines, 
   assert.equal(candidates[0]!.type, "TIERED_CUMULATIVE");
   assert.equal(candidates[0]!.beneficiaryKey, "artist");
   assert.equal(candidates[0]!.rateBasisPoints, 4600);
+});
+
+test("normalizeTiers sanitizes extra zeros and nulls out open-ended final tiers", () => {
+  const sample = [
+    { thresholdMinor: 0, rateBasisPoints: 4000, label: "Recoupment state (B_t > $0)" },
+    { thresholdMinor: 250000000, rateBasisPoints: 4600, label: "C_t < $250,000" },
+    { thresholdMinor: 750000000, rateBasisPoints: 5000, label: "$250,000 <= C_t < $750,000" },
+    { thresholdMinor: 750000000, rateBasisPoints: 5400, label: "C_t >= $750,000" },
+  ];
+
+  const normalized = normalizeTiers(sample);
+  assert.ok(normalized);
+  assert.equal(normalized.length, 4);
+  assert.equal(normalized[0]!.thresholdMinor, 0);
+  assert.equal(normalized[1]!.thresholdMinor, 25000000); // 250,000,000 -> 25,000,000 ($250k)
+  assert.equal(normalized[2]!.thresholdMinor, 75000000); // 750,000,000 -> 75,000,000 ($750k)
+  assert.equal(normalized[3]!.thresholdMinor, null);     // C_t >= $750,000 -> null (infinity)
 });
 
 
